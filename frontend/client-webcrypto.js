@@ -1,64 +1,75 @@
 /**
- * Cliente FIDO2 para autenticación de dispositivos frecuentes
+ * Cliente FIDO2-like (basado en WebCrypto) para autenticación de dispositivos frecuentes
  * Se encarga de la generación de claves, firma de desafíos y comunicación con el servidor
  */
 
-// Importar el generador de DeviceID
+// Importar el generador de DeviceID (asumiendo que existe y funciona)
 import { generateDeviceId } from './TrustDeviceGenerator.js';
 
 /**
- * Clase para manejar la autenticación de dispositivos frecuentes
+ * Clase para manejar la autenticación de dispositivos frecuentes usando WebCrypto
  */
 export class FrequentDeviceWebCryptoClient {
-    constructor(serverUrl = '/api') {
-        this.serverUrl = serverUrl;
+    constructor(serverBaseUrl = '') { // Ajustar si la API está en /api o similar
+        this.serverBaseUrl = serverBaseUrl; // e.g., '/api'
         this.deviceId = null;
-        this.publicKey = null;
-        this.privateKey = null;
+        this.publicKey = null; // Almacenado en formato JWK
+        // La clave privada no se guarda directamente en la instancia, se recupera de localStorage
     }
 
     /**
-     * Genera un ID de dispositivo único
+     * Genera un ID de dispositivo único y lo asigna a la instancia
      * @returns {Promise<string>} El ID del dispositivo generado
      */
-    async generateDeviceId() {
-        try {
-            this.deviceId = await generateDeviceId();
-            return this.deviceId + '-wc';
-        } catch (error) {
-            console.error('Error al generar Device ID:', error);
-            throw error;
+    async ensureDeviceId() {
+        if (!this.deviceId) {
+            try {
+                // Intenta obtenerlo de localStorage primero (si se registró previamente)
+                this.deviceId = localStorage.getItem("frequentDeviceId");
+                if (!this.deviceId) {
+                    console.log("Generando nuevo Device ID...");
+                    this.deviceId = await generateDeviceId();
+                    // Opcional: guardar el deviceId en localStorage si se quiere persistir entre sesiones
+                    // aunque se necesita para recuperar la clave privada de todas formas.
+                    localStorage.setItem("frequentDeviceId", this.deviceId);
+                }
+            } catch (error) {
+                console.error('Error al generar/obtener Device ID:', error);
+                throw error;
+            }
         }
+        return this.deviceId;
     }
 
     /**
-     * Genera un par de claves criptográficas para el dispositivo
-     * @returns {Promise<Object>} Objeto con las claves generadas
+     * Genera un par de claves criptográficas (RSA-PSS) para el dispositivo
+     * @returns {Promise<{publicKey: Object, privateKey: Object}>} Objeto con las claves JWK generadas
      */
     async generateKeyPair() {
         try {
-            // Generar par de claves RSA-PSS para firma/verificación
+            console.log("Generando par de claves RSA-PSS...");
             const keyPair = await window.crypto.subtle.generateKey(
                 {
-                    name: "RSASSA-PKCS1-v1_5",
+                    name: "RSASSA-PKCS1-v1_5", // O usar "ECDSA" con namedCurve: "P-256" para parecerse más a FIDO2
                     modulusLength: 2048,
                     publicExponent: new Uint8Array([0x01, 0x00, 0x01]),
                     hash: "SHA-256",
                 },
-                true,
+                true, // Extractable
                 ["sign", "verify"]
             );
 
-            // Exportar claves
             this.publicKey = await window.crypto.subtle.exportKey("jwk", keyPair.publicKey);
-            this.privateKey = await window.crypto.subtle.exportKey("jwk", keyPair.privateKey);
-            
-            // Guardar la clave privada en localStorage (cifrada)
-            await this.storePrivateKey();
+            const privateKey = await window.crypto.subtle.exportKey("jwk", keyPair.privateKey);
+
+            console.log("Claves generadas. Clave pública:", this.publicKey);
+
+            // Guardar la clave privada cifrada en localStorage
+            await this.storeEncryptedPrivateKey(privateKey);
 
             return {
                 publicKey: this.publicKey,
-                privateKey: this.privateKey
+                privateKey: privateKey // Devolverla por si se necesita inmediatamente, pero no almacenarla en la instancia
             };
         } catch (error) {
             console.error('Error al generar claves:', error);
@@ -67,66 +78,63 @@ export class FrequentDeviceWebCryptoClient {
     }
 
     /**
-     * Almacena la clave privada de forma segura (cifrada con el deviceId)
-     * @returns {Promise<boolean>} True si se almacenó correctamente
+     * Almacena la clave privada cifrada en localStorage usando el deviceId
+     * @param {Object} privateKey - Clave privada en formato JWK
+     * @returns {Promise<void>}
      */
-    async storePrivateKey() {
+    async storeEncryptedPrivateKey(privateKey) {
+        await this.ensureDeviceId(); // Asegurarse de que tenemos un deviceId
+        if (!this.deviceId || !privateKey) {
+            throw new Error('Se requiere deviceId y privateKey para almacenar');
+        }
         try {
-            if (!this.deviceId || !this.privateKey) {
-                throw new Error('Se requiere deviceId y privateKey para almacenar');
-            }
-
-            // Encriptar la clave privada usando el deviceId como contraseña
-            const encryptedPrivateKey = await this.encryptPrivateKey(this.privateKey, this.deviceId);
-
-            // Almacenar la clave privada encriptada en localStorage para persistencia
-            localStorage.setItem("frequentDevicePrivateKey", JSON.stringify(encryptedPrivateKey));
-            return true;
+            console.log("Cifrando y almacenando clave privada...");
+            const encryptedPrivateKey = await this.encryptPrivateKey(privateKey, this.deviceId);
+            localStorage.setItem("frequentDevicePrivateKey_enc", JSON.stringify(encryptedPrivateKey));
+            // Opcional: Almacenar la clave pública también para no tener que regenerarla
+            localStorage.setItem("frequentDevicePublicKey", JSON.stringify(this.publicKey));
+            console.log("Clave privada cifrada almacenada en localStorage.");
         } catch (error) {
-            console.error('Error al almacenar clave privada:', error);
+            console.error('Error al almacenar clave privada cifrada:', error);
             throw error;
         }
     }
 
     /**
-     * Encripta la clave privada usando el deviceId como contraseña
+     * Cifra la clave privada usando una clave derivada del password (deviceId)
      * @param {Object} privateKey - Clave privada en formato JWK
-     * @param {string} password - Contraseña para cifrar (deviceId)
-     * @returns {Promise<Object>} Objeto con la clave privada cifrada
+     * @param {string} password - Contraseña para derivar la clave de cifrado (deviceId)
+     * @returns {Promise<Object>} Objeto con iv y encryptedData (como arrays)
      */
     async encryptPrivateKey(privateKey, password) {
         try {
-            // Convertir el password (deviceId) a una clave de encriptación
             const encoder = new TextEncoder();
-            const passwordData = encoder.encode(password);
-            const passwordHash = await window.crypto.subtle.digest('SHA-256', passwordData);
+            const privateKeyStr = JSON.stringify(privateKey);
+            const privateKeyData = encoder.encode(privateKeyStr);
 
-            // Importar la clave para usar en encriptación AES-GCM
-            const encryptionKey = await window.crypto.subtle.importKey(
-                'raw',
-                passwordHash,
-                { name: 'AES-GCM' },
-                false,
+            // Derivar clave de cifrado desde el password (deviceId) usando PBKDF2
+            const salt = window.crypto.getRandomValues(new Uint8Array(16));
+            const passwordKey = await window.crypto.subtle.importKey(
+                'raw', encoder.encode(password), { name: 'PBKDF2' }, false, ['deriveKey']
+            );
+            const encryptionKey = await window.crypto.subtle.deriveKey(
+                { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
+                passwordKey,
+                { name: 'AES-GCM', length: 256 },
+                true,
                 ['encrypt']
             );
 
-            // Generar un vector de inicialización (IV) aleatorio
+            // Cifrar con AES-GCM
             const iv = window.crypto.getRandomValues(new Uint8Array(12));
-
-            // Encriptar la clave privada
-            const privateKeyStr = JSON.stringify(privateKey);
-            const privateKeyData = encoder.encode(privateKeyStr);
             const encryptedData = await window.crypto.subtle.encrypt(
-                {
-                    name: 'AES-GCM',
-                    iv: iv
-                },
+                { name: 'AES-GCM', iv: iv },
                 encryptionKey,
                 privateKeyData
             );
 
-            // Convertir a formato que se pueda almacenar
             return {
+                salt: Array.from(salt), // Guardar salt para descifrado
                 iv: Array.from(iv),
                 encryptedData: Array.from(new Uint8Array(encryptedData))
             };
@@ -137,149 +145,193 @@ export class FrequentDeviceWebCryptoClient {
     }
 
     /**
-     * Recupera y descifra la clave privada almacenada
-     * @param {string} customPassword - Contraseña personalizada (opcional)
-     * @returns {Promise<CryptoKey>} Clave privada importada lista para usar
+     * Recupera y descifra la clave privada almacenada usando el deviceId.
+     * @returns {Promise<CryptoKey>} Clave privada importada lista para usar (para firmar)
      */
-    async retrievePrivateKey(customPassword = null) {
+    async retrieveAndDecryptPrivateKey() {
+        await this.ensureDeviceId(); // Asegurarse de que tenemos el deviceId
+        const storedEncryptedKey = localStorage.getItem("frequentDevicePrivateKey_enc");
+        if (!storedEncryptedKey) {
+            throw new Error('No se encontró clave privada cifrada almacenada');
+        }
+        if (!this.deviceId) {
+             throw new Error('Se requiere deviceId para descifrar la clave');
+        }
+
         try {
-            const storedEncryptedKey = localStorage.getItem("frequentDevicePrivateKey");
-            if (!storedEncryptedKey) {
-                throw new Error('No se encontró clave privada almacenada');
-            }
-
-            // Usar la contraseña personalizada si se proporciona, de lo contrario usar deviceId
-            const password = customPassword || this.deviceId;
-            if (!password) {
-                throw new Error('Se requiere una contraseña o deviceId para descifrar');
-            }
-
-            // Desencriptar la clave privada
+            console.log("Recuperando y descifrando clave privada...");
             const encryptedKey = JSON.parse(storedEncryptedKey);
-            const decryptedPrivateKey = await this.decryptPrivateKey(encryptedKey, password);
-            this.privateKey = decryptedPrivateKey;
+            const decryptedPrivateKeyJWK = await this.decryptPrivateKey(encryptedKey, this.deviceId);
 
-            // Importar la clave para firma
+            // Importar la clave JWK descifrada para poder usarla en operaciones de firma
             const importedKey = await window.crypto.subtle.importKey(
                 "jwk",
-                decryptedPrivateKey,
-                {
+                decryptedPrivateKeyJWK,
+                { // Asegurarse de que los parámetros coincidan con los de generación
                     name: "RSASSA-PKCS1-v1_5",
                     hash: "SHA-256",
                 },
-                true,
-                ["sign"]
+                true, // Extractable debe ser true si se exportó así
+                ["sign"] // El propósito debe ser 'sign'
             );
-
+            console.log("Clave privada descifrada e importada lista para usar.");
             return importedKey;
         } catch (error) {
-            console.error('Error al recuperar clave privada:', error);
+            console.error('Error al recuperar/descifrar clave privada:', error);
+            // Podría ser un deviceId incorrecto o corrupción de datos
+            localStorage.removeItem("frequentDevicePrivateKey_enc"); // Eliminar clave inválida?
+            localStorage.removeItem("frequentDeviceId"); // Eliminar ID asociado?
+            this.deviceId = null; // Resetear deviceId
             throw error;
         }
     }
 
     /**
-     * Descifra la clave privada usando el deviceId como contraseña
-     * @param {Object} encryptedKey - Objeto con la clave privada cifrada
-     * @param {string} password - Contraseña para descifrar (deviceId)
+     * Descifra la clave privada usando una clave derivada del password (deviceId)
+     * @param {Object} encryptedKey - Objeto con salt, iv, encryptedData
+     * @param {string} password - Contraseña para derivar la clave (deviceId)
      * @returns {Promise<Object>} Clave privada descifrada en formato JWK
      */
     async decryptPrivateKey(encryptedKey, password) {
         try {
-            // Convertir el password a una clave de desencriptación
+            const salt = new Uint8Array(encryptedKey.salt);
+            const iv = new Uint8Array(encryptedKey.iv);
+            const encryptedData = new Uint8Array(encryptedKey.encryptedData);
             const encoder = new TextEncoder();
-            const passwordData = encoder.encode(password);
-            const passwordHash = await window.crypto.subtle.digest('SHA-256', passwordData);
 
-            // Importar la clave para usar en desencriptación AES-GCM
-            const decryptionKey = await window.crypto.subtle.importKey(
-                'raw',
-                passwordHash,
-                { name: 'AES-GCM' },
-                false,
+            // Derivar clave de descifrado desde el password (deviceId) usando PBKDF2 y el salt guardado
+            const passwordKey = await window.crypto.subtle.importKey(
+                'raw', encoder.encode(password), { name: 'PBKDF2' }, false, ['deriveKey']
+            );
+            const decryptionKey = await window.crypto.subtle.deriveKey(
+                { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
+                passwordKey,
+                { name: 'AES-GCM', length: 256 },
+                true,
                 ['decrypt']
             );
 
-            // Reconstruir el IV y los datos encriptados
-            const iv = new Uint8Array(encryptedKey.iv);
-            const encryptedData = new Uint8Array(encryptedKey.encryptedData);
-
-            // Desencriptar la clave privada
+            // Descifrar con AES-GCM
             const decryptedData = await window.crypto.subtle.decrypt(
-                {
-                    name: 'AES-GCM',
-                    iv: iv
-                },
+                { name: 'AES-GCM', iv: iv },
                 decryptionKey,
                 encryptedData
             );
 
-            // Convertir de vuelta a objeto
+            // Convertir de vuelta a objeto JWK
             const decoder = new TextDecoder();
             const decryptedStr = decoder.decode(decryptedData);
             return JSON.parse(decryptedStr);
         } catch (error) {
-            console.error('Error al desencriptar la clave privada:', error);
-            throw error;
+            console.error('Error al desencriptar la clave privada (¿DeviceId incorrecto?):', error);
+            throw new Error('No se pudo descifrar la clave privada. El Device ID podría ser incorrecto.');
         }
     }
 
+     /**
+     * Verifica si ya existe una clave cifrada para el deviceId actual en localStorage.
+     * También carga la clave pública si existe.
+     * @returns {Promise<boolean>} True si existe una clave cifrada.
+     */
+    async checkForExistingCredential() {
+        await this.ensureDeviceId(); // Carga o genera deviceId
+        const storedEncryptedKey = localStorage.getItem("frequentDevicePrivateKey_enc");
+        const storedPublicKey = localStorage.getItem("frequentDevicePublicKey");
+
+        if (storedEncryptedKey && this.deviceId) {
+             console.log(`Clave cifrada encontrada para deviceId: ${this.deviceId}`);
+             if (storedPublicKey) {
+                 this.publicKey = JSON.parse(storedPublicKey);
+             }
+             return true;
+        }
+        console.log("No se encontró credencial local existente.");
+        return false;
+    }
+
     /**
-     * Registra el dispositivo en el servidor
+     * Realiza el proceso de "enrollment" (registro) en 1 paso.
+     * Genera claves si no existen y envía la clave pública al servidor.
      * @returns {Promise<Object>} Respuesta del servidor
      */
-    async registerDevice() {
+    async enrollDevice() {
         try {
-            if (!this.deviceId) {
-                throw new Error('Se requiere generar un deviceId antes de registrar');
-            }
+            await this.ensureDeviceId(); // Asegura tener deviceId
+
+            // Generar claves solo si no tenemos una clave pública (o si queremos forzar regeneración)
+             if (!this.publicKey) {
+                 const existing = await this.checkForExistingCredential();
+                 if (!existing) {
+                    console.log("Generando nuevas claves para enrollment...");
+                    await this.generateKeyPair(); // Genera y almacena la privada cifrada, guarda la pública en this.publicKey
+                 } else if (!this.publicKey) {
+                    // Teníamos clave privada pero no pública en la instancia, cargarla
+                     const storedPublicKey = localStorage.getItem("frequentDevicePublicKey");
+                     if(storedPublicKey) this.publicKey = JSON.parse(storedPublicKey);
+                     else {
+                         // Caso raro: privada cifrada existe pero pública no. Forzar regeneración.
+                         console.warn("Clave pública no encontrada en localStorage, regenerando par de claves.");
+                         await this.generateKeyPair();
+                     }
+                 }
+             }
+
 
             if (!this.publicKey) {
-                // Si no hay claves, generarlas
-                await this.generateKeyPair();
+                 throw new Error("No se pudo obtener la clave pública para el registro.");
             }
 
-            // Enviar la clave pública al servidor
-            const response = await fetch(`${this.serverUrl}/register`, {
+            console.log(`Iniciando enrollment para Device ID: ${this.deviceId}`);
+            console.log("Enviando clave pública al servidor:", this.publicKey);
+
+            const response = await fetch(`${this.serverBaseUrl}/enroll-1-step`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
                     deviceId: this.deviceId,
-                    publicKey: this.publicKey
+                    publicKey: this.publicKey // Enviar clave pública en formato JWK
                 })
             });
 
             const data = await response.json();
-            if (!data.success) {
-                throw new Error(data.error || 'Error al registrar el dispositivo');
+
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || `Error en el servidor durante el enrollment: ${response.statusText}`);
             }
 
+            console.log("Enrollment completado con éxito:", data);
             return data;
         } catch (error) {
-            console.error('Error al registrar dispositivo:', error);
+            console.error('Error en el proceso de enrollment:', error);
             throw error;
         }
     }
 
+
     /**
-     * Solicita un challenge al servidor
-     * @returns {Promise<string>} El challenge generado
+     * Solicita un challenge al servidor para la autenticación.
+     * @returns {Promise<string>} El challenge generado por el servidor.
      */
     async requestChallenge() {
+        await this.ensureDeviceId(); // Asegura tener deviceId
+        if (!this.deviceId) {
+            throw new Error('Se requiere deviceId para solicitar un challenge');
+        }
         try {
-            if (!this.deviceId) {
-                throw new Error('Se requiere deviceId para solicitar un challenge');
-            }
-
-            const response = await fetch(`${this.serverUrl}/challenge?deviceId=${this.deviceId}`);
+            console.log(`Solicitando challenge para Device ID: ${this.deviceId}`);
+            const response = await fetch(`${this.serverBaseUrl}/challenge?deviceId=${encodeURIComponent(this.deviceId)}`);
             const data = await response.json();
 
-            if (!data.success) {
-                throw new Error(data.error || 'Error al solicitar challenge');
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || `Error al solicitar challenge: ${response.statusText}`);
+            }
+            if (!data.challenge) {
+                 throw new Error('El servidor no devolvió un challenge válido.');
             }
 
+            console.log("Challenge recibido:", data.challenge);
             return data.challenge;
         } catch (error) {
             console.error('Error al solicitar challenge:', error);
@@ -288,126 +340,126 @@ export class FrequentDeviceWebCryptoClient {
     }
 
     /**
-     * Firma un challenge con la clave privada
-     * @param {string} challenge - El challenge a firmar
-     * @param {string} customPassword - Contraseña personalizada (opcional)
-     * @returns {Promise<string>} La firma en formato base64
+     * Firma un challenge con la clave privada recuperada y descifrada.
+     * @param {string} challenge - El challenge a firmar.
+     * @returns {Promise<string>} La firma en formato base64.
      */
-    async signChallenge(challenge, customPassword = null) {
+    async signChallenge(challenge) {
         try {
-            // Recuperar la clave privada
-            const privateKey = await this.retrievePrivateKey(customPassword);
+            // Recuperar y descifrar la clave privada
+            const privateKey = await this.retrieveAndDecryptPrivateKey();
 
-            // Convertir el challenge a ArrayBuffer
+            // Convertir el challenge (string) a ArrayBuffer
             const encoder = new TextEncoder();
             const challengeData = encoder.encode(challenge);
 
-            // Firmar el challenge
-            const signature = await window.crypto.subtle.sign(
-                {
-                    name: "RSASSA-PKCS1-v1_5"
-                },
+            console.log("Firmando el challenge...");
+            // Firmar el challenge usando la clave privada importada
+            const signatureBuffer = await window.crypto.subtle.sign(
+                { name: "RSASSA-PKCS1-v1_5" }, // Debe coincidir con la generación/importación
                 privateKey,
                 challengeData
             );
 
-            // Convertir la firma a base64
-            return this.arrayBufferToBase64(signature);
+            // Convertir la firma (ArrayBuffer) a base64 para enviarla
+            const signatureBase64 = this.arrayBufferToBase64(signatureBuffer);
+            console.log("Challenge firmado. Firma (Base64):", signatureBase64.substring(0, 20) + "..."); // Log corto
+            return signatureBase64;
         } catch (error) {
             console.error('Error al firmar challenge:', error);
-            throw error;
+            throw error; // Re-lanzar para que authenticate() lo maneje
         }
     }
 
     /**
-     * Verifica la firma del challenge en el servidor
-     * @param {string} challenge - El challenge firmado
-     * @param {string} signature - La firma en formato base64
-     * @returns {Promise<Object>} Respuesta del servidor
+     * Envía el challenge firmado al servidor para su validación.
+     * @param {string} challenge - El challenge original.
+     * @param {string} signature - La firma en formato base64.
+     * @returns {Promise<Object>} Respuesta del servidor sobre la validación.
      */
-    async verifySignature(challenge, signature) {
+    async validateSignature(challenge, signature) {
+         await this.ensureDeviceId(); // Asegura tener deviceId
+         if (!this.deviceId) {
+            throw new Error('Se requiere deviceId para validar la firma');
+         }
         try {
-            if (!this.deviceId) {
-                throw new Error('Se requiere deviceId para verificar la firma');
-            }
-
-            const response = await fetch(`${this.serverUrl}/verify`, {
+            console.log(`Validando firma para Device ID: ${this.deviceId}`);
+            const response = await fetch(`${this.serverBaseUrl}/validate`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
                     deviceId: this.deviceId,
-                    challenge,
-                    signature
+                    challenge: challenge,
+                    signature: signature // Firma en base64
                 })
             });
 
             const data = await response.json();
-            if (!data.success) {
-                throw new Error(data.error || 'Error al verificar la firma');
-            }
 
-            return data;
+             if (!response.ok) { // Chequear status code HTTP ademas del success
+                 throw new Error(data.error || `Error del servidor durante la validación: ${response.statusText}`);
+             }
+             // No necesariamente lanzar error si success es false, depende de cómo lo maneje el servidor
+             // if (!data.success) {
+             //    console.warn("Validación fallida:", data.error || "Razón desconocida");
+             // }
+
+
+            console.log("Respuesta de validación recibida:", data);
+            return data; // Devolver la respuesta completa (puede incluir {success: boolean, error?: string})
         } catch (error) {
-            console.error('Error al verificar firma:', error);
+            console.error('Error al validar firma en el servidor:', error);
             throw error;
         }
     }
 
     /**
-     * Realiza el proceso completo de autenticación
-     * @param {string} customPassword - Contraseña personalizada (opcional)
-     * @returns {Promise<Object>} Resultado de la autenticación
+     * Realiza el proceso completo de autenticación FIDO2-like.
+     * @returns {Promise<Object>} Resultado de la autenticación del servidor.
      */
-    async authenticate(customPassword = null) {
+    async authenticate() {
         try {
+            // 0. Asegurarse de que tenemos un deviceId
+            await this.ensureDeviceId();
+             if (!this.deviceId) {
+                 throw new Error("No se pudo obtener un Device ID para la autenticación.");
+             }
+            console.log(`Iniciando autenticación para Device ID: ${this.deviceId}`);
+
             // 1. Solicitar un challenge al servidor
             const challenge = await this.requestChallenge();
-            console.log('Challenge recibido:', challenge);
 
-            // 2. Firmar el challenge con la clave privada
-            const signature = await this.signChallenge(challenge, customPassword);
-            console.log('Challenge firmado');
+            // 2. Firmar el challenge con la clave privada (recuperada y descifrada)
+            const signature = await this.signChallenge(challenge);
 
             // 3. Enviar la firma al servidor para verificación
-            const verificationResult = await this.verifySignature(challenge, signature);
-            console.log('Verificación completada:', verificationResult);
+            const validationResult = await this.validateSignature(challenge, signature);
 
-            return verificationResult;
-        } catch (error) {
-            console.error('Error en el proceso de autenticación:', error);
-            throw error;
-        }
-    }
-    
-    /**
-     * Valida si el dispositivo está registrado en el servidor
-     * Realiza una verificación simple solicitando un challenge
-     * @returns {Promise<boolean>} True si el dispositivo es válido
-     */
-    async validateDevice() {
-        try {
-            if (!this.deviceId) {
-                throw new Error('Se requiere deviceId para validar el dispositivo');
+            if (validationResult.success) {
+                console.log("Autenticación completada con éxito.");
+            } else {
+                 console.warn("Autenticación fallida:", validationResult.error || "El servidor rechazó la firma.");
             }
-            
-            // Intentar solicitar un challenge al servidor
-            // Si el dispositivo no está registrado, esto fallará
-            await this.requestChallenge();
-            
-            // Si llegamos aquí, el dispositivo es válido
-            return true;
+
+            return validationResult; // Devuelve la respuesta del servidor ({success: boolean, ...})
         } catch (error) {
-            console.error('Error al validar dispositivo:', error);
-            throw error;
+            console.error('Error en el proceso de autenticación completo:', error);
+            // Si el error fue por no poder descifrar la clave, informar al usuario podría ser útil.
+            if (error.message.includes("descifrar la clave privada")) {
+                 alert("No se pudo acceder a la clave guardada. ¿Quizás el Device ID cambió o los datos están corruptos?");
+            }
+            throw error; // Re-lanzar para manejo externo si es necesario
         }
     }
 
+    // --- Helper Functions ---
+
     /**
-     * Convierte un ArrayBuffer a una cadena Base64
+     * Convierte un ArrayBuffer a una cadena Base64 URL Safe
      * @param {ArrayBuffer} buffer - El buffer a convertir
-     * @returns {string} Cadena en formato Base64
+     * @returns {string} Cadena en formato Base64 URL Safe
      */
     arrayBufferToBase64(buffer) {
         const bytes = new Uint8Array(buffer);
@@ -415,20 +467,91 @@ export class FrequentDeviceWebCryptoClient {
         for (let i = 0; i < bytes.byteLength; i++) {
             binary += String.fromCharCode(bytes[i]);
         }
-        return btoa(binary);
+        // Convertir a Base64 y hacerlo URL safe
+        return btoa(binary)
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/, ''); // Quitar padding
     }
 
     /**
-     * Convierte una cadena Base64 a ArrayBuffer
-     * @param {string} base64 - Cadena en formato Base64
+     * Convierte una cadena Base64 URL Safe a ArrayBuffer
+     * @param {string} base64 - Cadena en formato Base64 URL Safe
      * @returns {ArrayBuffer} El buffer resultante
      */
     base64ToArrayBuffer(base64) {
-        const binaryString = atob(base64);
+         // Reemplazar caracteres URL safe y añadir padding si es necesario
+        let base64Standard = base64.replace(/-/g, '+').replace(/_/g, '/');
+        while (base64Standard.length % 4) {
+            base64Standard += '=';
+        }
+        const binaryString = atob(base64Standard);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
             bytes[i] = binaryString.charCodeAt(i);
         }
         return bytes.buffer;
     }
+
+    /**
+     * Elimina la credencial local (deviceId y clave privada cifrada)
+     */
+    clearLocalCredentials() {
+        localStorage.removeItem("frequentDeviceId");
+        localStorage.removeItem("frequentDevicePrivateKey_enc");
+        localStorage.removeItem("frequentDevicePublicKey");
+        this.deviceId = null;
+        this.publicKey = null;
+        console.log("Credenciales locales eliminadas.");
+    }
 }
+
+// Ejemplo de cómo usarlo (esto iría en tu script principal de la página)
+/*
+async function exampleUsage() {
+    const client = new FrequentDeviceWebCryptoClient('/api'); // Ajusta la URL base de tu API
+
+    try {
+        // Intentar autenticar directamente si ya está registrado
+        const isAuthenticated = await client.checkForExistingCredential();
+        if (isAuthenticated) {
+            console.log("Credencial encontrada, intentando autenticar...");
+            const authResult = await client.authenticate();
+            if (authResult.success) {
+                alert("Autenticación exitosa!");
+                // Proceder con la sesión de usuario
+            } else {
+                alert("Fallo la autenticación: " + (authResult.error || "Razón desconocida"));
+                // Quizás ofrecer registrar de nuevo
+                console.log("Ofreciendo registrar de nuevo...");
+                await client.clearLocalCredentials(); // Limpiar credenciales viejas/inválidas
+                const enrollResult = await client.enrollDevice();
+                 if (enrollResult.success) {
+                    alert("Dispositivo registrado de nuevo con éxito.");
+                 } else {
+                    alert("Fallo al registrar el dispositivo: " + (enrollResult.error || ""));
+                 }
+            }
+        } else {
+            // No hay credencial, registrar el dispositivo
+            console.log("No hay credencial local, registrando dispositivo...");
+            const enrollResult = await client.enrollDevice();
+            if (enrollResult.success) {
+                alert("Dispositivo registrado con éxito!");
+                // Podrías intentar autenticar inmediatamente después si quieres
+                // const authResult = await client.authenticate();
+                // console.log("Resultado de autenticación post-registro:", authResult);
+            } else {
+                alert("Fallo al registrar el dispositivo: " + (enrollResult.error || "Razón desconocida"));
+            }
+        }
+
+    } catch (error) {
+        console.error("Error general:", error);
+        alert("Ocurrió un error: " + error.message);
+    }
+}
+
+// Llamar a la función de ejemplo cuando sea apropiado (ej. al cargar la página o al hacer clic en un botón)
+// window.addEventListener('load', exampleUsage);
+*/

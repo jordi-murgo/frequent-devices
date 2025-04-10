@@ -176,7 +176,7 @@ app.post('/api/register', (req, res) => {
         
         // Validar que la credencial tenga los campos necesarios
         if (!credential.id || !credential.rawId || !credential.type || 
-            !credential.response || !credential.response.clientDataJSON || 
+            !credential.response || !credential.response.clientDataJSON ||
             !credential.response.attestationObject) {
             return res.status(400).json({
                 success: false,
@@ -195,9 +195,22 @@ app.post('/api/register', (req, res) => {
         
         console.log(`Dispositivo WebAuthn registrado: ${deviceId}`);
         console.log(`ID de credencial: ${credential.id}`);
-        console.log(`Tipo de credencial: ${credential.type}`);
-        console.log(`Datos de respuesta disponibles: ${Object.keys(credential.response).join(', ')}`);
-        console.log(`Datos persistidos en: ${WEBAUTHN_CREDENTIALS_FILE}`);
+        if (!publicKey) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Se requiere publicKey para WebCrypto' 
+            });
+        }
+        
+        // Almacenar la clave pública asociada al deviceId
+        devicePublicKeys.set(deviceId, publicKey);
+        
+        // Persistir los datos actualizados
+        saveMapToFile(devicePublicKeys, PUBLIC_KEYS_FILE);
+        
+        console.log(`Dispositivo WebCrypto registrado: ${deviceId}`);
+        console.log(`Clave pública: ${JSON.stringify(publicKey).substring(0, 50)}...`);
+        console.log(`Datos persistidos en: ${PUBLIC_KEYS_FILE}`);
     } else {
         // Registro WebCrypto (comportamiento original)
         if (!publicKey) {
@@ -216,6 +229,11 @@ app.post('/api/register', (req, res) => {
         console.log(`Dispositivo WebCrypto registrado: ${deviceId}`);
         console.log(`Clave pública: ${JSON.stringify(publicKey).substring(0, 50)}...`);
         console.log(`Datos persistidos en: ${PUBLIC_KEYS_FILE}`);
+    } else {
+        return res.status(400).json({ 
+            success: false, 
+            error: 'Tipo de autenticación no soportado' 
+        });
     }
     
     return res.json({
@@ -468,7 +486,7 @@ function verifyWebAuthnSignature(signatureData, challenge, credential) {
         // Convertimos el challenge del servidor a base64url para comparar
         let normalizedServerChallenge = challenge;
         // Reemplazar caracteres no URL-safe si existen
-        normalizedServerChallenge = normalizedServerChallenge.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+        normalizedServerChallenge = normalizedServerChallenge.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '').replace(/=+$/, '');
         
         // También podemos intentar la comparación inversa (convertir el challenge del cliente a base64 estándar)
         const normalizedClientChallenge = challengeFromClient.replace(/-/g, '+').replace(/_/g, '/');
@@ -500,7 +518,7 @@ function verifyWebAuthnSignature(signatureData, challenge, credential) {
         const allowedOrigins = [
             'http://localhost:3000',     // Desarrollo local directo
             'http://localhost:8080',     // Posible proxy local
-            'https://localhost:8080',    // Posible proxy local con HTTPS
+            'http://127.0.0.1:8080',     // Acceso por localhost alternativo
             'https://demo.savagesoftware.dev', // Ejemplo de dominio de producción
             // Añadir aquí otros orígenes válidos según sea necesario
         ];
@@ -516,8 +534,6 @@ function verifyWebAuthnSignature(signatureData, challenge, credential) {
             };
         }
         
-        console.log(`Origen válido verificado: ${origin}`);
-
         // 4. Verificar el tipo de operación
         if (clientDataJSON.type !== 'webauthn.get') {
             return {
@@ -597,10 +613,13 @@ function verifyWebAuthnSignature(signatureData, challenge, credential) {
             
             // Construir los datos que fueron firmados
             // 1. El hash del clientDataJSON
-            const clientDataHash = crypto.createHash('sha256')
-                .update(Buffer.from(signatureData.clientDataJSON, 'base64'))
+            const clientDataHash = crypto
+                .createHash('sha256')
+                .update(Buffer.from(signatureData.clientDataJSON, 'base64').toString('utf8')) // Convertir a UTF-8
                 .digest();
-            
+
+
+
             // 2. Concatenar authenticatorData y clientDataHash
             const signedData = Buffer.concat([
                 Buffer.from(signatureData.authenticatorData, 'base64'),
@@ -609,20 +628,55 @@ function verifyWebAuthnSignature(signatureData, challenge, credential) {
             
             // 3. Verificar la firma
             // Nota: En una implementación real, extraeríamos y usaríamos la clave pública
-            // del attestationObject. Aquí usamos una verificación simplificada.
+            // del attestationObject.
             
-            // Verificación simplificada: comparamos los hashes de los datos firmados
-            // Esto es una aproximación y no una verificación criptográfica completa
-            const expectedDataHash = crypto.createHash('sha256').update(signedData).digest('base64');
-            const signatureHash = crypto.createHash('sha256')
-                .update(Buffer.from(signatureData.signature, 'base64'))
-                .digest('base64');
+            // Importar la función jwkToPem si no está disponible globalmente
+            const jwkToPem = typeof global.jwkToPem === 'function' ? global.jwkToPem : require('jwk-to-pem');
             
-            console.log('Verificación de firma:', {
-                expectedDataHash: expectedDataHash.substring(0, 20) + '...',
-                signatureHash: signatureHash.substring(0, 20) + '...'
-            });
+            const pubKeyCose = attestationObject.authData.slice(
+                attestationObject.authData.byteLength - 65
+            );
+            const pubKeyX = pubKeyCose.slice(1, 33);
+            const pubKeyY = pubKeyCose.slice(33);
             
+            const jwk = {
+                kty: 'EC',
+                crv: 'P-256',
+                x: base64url.encode(pubKeyX),
+                y: base64url.encode(pubKeyY),
+            };
+            
+            const verifier = crypto.createVerify('sha256');
+            verifier.update(signedData);
+            
+            const isValid = verifier.verify(
+                jwkToPem(jwk),
+                Buffer.from(signatureData.signature, 'base64')
+            );
+            
+            if (!isValid) {
+                return {
+                    isValid: false,
+                    error: 'La firma no es válida'
+                };
+            }
+            
+            // // Verificación simplificada: comparamos los hashes de los datos firmados
+            // // Esto es una aproximación y no una verificación criptográfica completa
+            // const expectedDataHash = crypto.createHash('sha256').update(signedData).digest('base64');
+            // const signatureHash = crypto.createHash('sha256')
+            //     .update(Buffer.from(signatureData.signature, 'base64'))
+            //     .digest('base64');
+            
+            // console.log('Verificación de firma:', {
+            //     expectedDataHash: expectedDataHash.substring(0, 20) + '...',
+            //     signatureHash: signatureHash.substring(0, 20) + '...'
+            // });
+            
+            // return {
+            //     isValid: true
+            // };
+
             // En una implementación completa, usaríamos la clave pública para verificar
             // la firma criptográficamente. Para esta demo, consideramos la verificación exitosa
             // si hemos pasado todas las verificaciones anteriores.
