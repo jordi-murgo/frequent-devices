@@ -1,0 +1,18 @@
+{
+  "name": "fido2-web-server",
+  "version": "1.0.0",
+  "description": "Simple web server with API proxy for FIDO2 authentication",
+  "main": "web-server.js",
+  "scripts": {
+    "start": "node web-server.js",
+    "dev": "nodemon web-server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "http-proxy-middleware": "^2.0.6",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Autenticación de dispositivo frecuente</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use TrustDevice-js for device fingerprinting -->
+    <script type="module" src="TrustDeviceGenerator.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #6e8efb, #a777e3);
+        }
+
+        .card-shadow {
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+
+        .pulse-animation {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(167, 119, 227, 0.4);
+            }
+
+            70% {
+                transform: scale(1.05);
+                box-shadow: 0 0 0 10px rgba(167, 119, 227, 0);
+            }
+
+            100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(167, 119, 227, 0);
+            }
+        }
+    </style>
+</head>
+
+<body class="min-h-screen gradient-bg flex items-center justify-center p-4">
+    <div class="w-full max-w-5xl flex flex-col md:flex-row gap-4">
+        <!-- Formulario (Izquierda) -->
+        <div class="w-full md:w-1/2">
+            <div
+                class="bg-white rounded-xl card-shadow overflow-hidden transition-all duration-300 hover:shadow-xl h-full">
+                <div class="p-6">
+                    <div class="flex items-center justify-center mb-6">
+                        <div class="bg-purple-100 p-3 rounded-full pulse-animation">
+                            <i class="fas fa-shield-alt text-purple-600 text-3xl"></i>
+                        </div>
+                    </div>
+
+                    <h1 class="text-2xl font-bold text-center text-gray-800 mb-2">Autenticación de Dispositivos
+                        Frecuentes
+                    </h1>
+                    <p class="text-gray-600 text-center mb-6">Registra y autentica tu dispositivo de forma segura</p>
+
+                    <div class="space-y-4">
+                        <div class="bg-gray-50 p-4 rounded-lg">
+                            <div class="flex items-center mb-2">
+                                <span
+                                    class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Device
+                                    ID</span>
+                                <span id="deviceId" class="ml-auto font-mono text-sm text-gray-600 truncate">No
+                                    generado</span>
+                            </div>
+                            <button id="generateDeviceId" type="button"
+                                class="w-full bg-purple-100 hover:bg-purple-200 text-purple-700 font-medium py-2 px-4 rounded-md transition flex items-center justify-center">
+                                <i class="fas fa-qrcode mr-2"></i> Generar Device ID
+                            </button>
+                        </div>
+
+                        <div class="bg-gray-50 p-4 rounded-lg">
+                            <h3 class="font-medium text-gray-700 mb-2 flex items-center">
+                                <i class="fas fa-mobile-alt mr-2 text-purple-500"></i> Registro (Enroll)
+                            </h3>
+                            <div class="mb-3">
+                                <label class="block text-sm text-gray-600 mb-1">ID de dispositivo</label>
+                                <input id="username" type="text"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-200"
+                                    placeholder="ID del dispositivo">
+                            </div>
+                            <button id="enrollBtn" type="button"
+                                class="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded-md transition flex items-center justify-center disabled:opacity-50"
+                                disabled>
+                                <i class="fas fa-save mr-2"></i> Registrar Dispositivo
+                            </button>
+                        </div>
+
+                        <div class="bg-gray-50 p-4 rounded-lg">
+                            <h3 class="font-medium text-gray-700 mb-2 flex items-center">
+                                <i class="fas fa-key mr-2 text-green-500"></i> Autenticación
+                            </h3>
+                            <div class="mb-3">
+                                <label class="block text-sm text-gray-600 mb-1">Clave descifrado privateKey</label>
+                                <div class="relative">
+                                    <input id="authDeviceId" type="password"
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-200"
+                                        placeholder="ID del dispositivo">
+                                    <button id="togglePassword" type="button"
+                                        class="absolute right-2 top-2 text-gray-500 hover:text-gray-700"
+                                        aria-label="Mostrar/ocultar contraseña">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="flex space-x-2 mb-3">
+                                <button id="validateBtn" type="button"
+                                    class="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-md transition flex items-center justify-center">
+                                    <i class="fas fa-check-circle mr-2"></i> Validar
+                                </button>
+                                <button id="authBtn" type="button"
+                                    class="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-md transition flex items-center justify-center disabled:opacity-50"
+                                    disabled>
+                                    <i class="fas fa-fingerprint mr-2"></i> Autenticar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Log (Derecha) -->
+        <div class="w-full md:w-1/2 flex">
+            <div
+                class="bg-white rounded-xl card-shadow overflow-hidden transition-all duration-300 hover:shadow-xl h-full w-full">
+                <div class="p-4 h-full flex flex-col">
+                    <h3 class="font-medium text-gray-700 mb-2 flex items-center">
+                        <i class="fas fa-terminal mr-2 text-gray-500"></i> Registro de actividad
+                    </h3>
+                    <div id="statusLog"
+                        class="text-sm text-gray-600 overflow-y-auto bg-gray-50 p-3 rounded border border-gray-200"
+                        style="height: 700px; max-height: 700px;">
+                        <p class="text-gray-500 italic">Esperando acciones...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+
+
+        // Import the TrustDeviceGenerator
+        import { generateDeviceId } from './TrustDeviceGenerator.js';
+
+        // Elementos del DOM
+        const generateDeviceIdBtn = document.getElementById('generateDeviceId');
+        const enrollBtn = document.getElementById('enrollBtn');
+        const validateBtn = document.getElementById('validateBtn');
+        const authBtn = document.getElementById('authBtn');
+        const deviceIdElement = document.getElementById('deviceId');
+        const usernameInput = document.getElementById('username');
+        const authDeviceIdInput = document.getElementById('authDeviceId');
+        const togglePasswordBtn = document.getElementById('togglePassword');
+        const statusLog = document.getElementById('statusLog');
+
+        // Variables de estado
+        let deviceId = null;
+        let publicKey = null;
+        let privateKey = null;
+        let enrolled = false;
+
+        // Funcionalidad para mostrar/ocultar contraseña
+        togglePasswordBtn.addEventListener('click', () => {
+            // Cambiar el tipo de input entre password y text
+            const type = authDeviceIdInput.getAttribute('type') === 'password' ? 'text' : 'password';
+            authDeviceIdInput.setAttribute('type', type);
+
+            // Cambiar el icono según el estado
+            togglePasswordBtn.querySelector('i').className = type === 'password' ? 'fas fa-eye' : 'fas fa-eye-slash';
+
+            // Actualizar el aria-label para accesibilidad
+            togglePasswordBtn.setAttribute('aria-label', type === 'password' ? 'Mostrar contraseña' : 'Ocultar contraseña');
+        });
+
+        // Verificar si ya existen claves almacenadas y generar DeviceID al cargar la página
+        window.addEventListener('DOMContentLoaded', async () => {
+            // Generar DeviceID automáticamente al iniciar
+            try {
+                addToLog("Generando Device ID automáticamente...");
+
+                // Usar el generador de DeviceID
+                deviceId = await generateDeviceId();
+
+                deviceIdElement.textContent = deviceId;
+                deviceIdElement.title = deviceId;
+
+                addToLog(`Device ID generado: ${deviceId}`);
+
+                // Colocar el DeviceID en los campos de entrada
+                usernameInput.value = deviceId;
+                authDeviceIdInput.value = deviceId;
+
+                // Habilitar botón de enroll
+                enrollBtn.disabled = false;
+
+                // Verificar si ya existen claves almacenadas
+                await checkStoredKeys();
+            } catch (error) {
+                addToLog(`Error al generar Device ID: ${error.message}`, 'error');
+            }
+        });
+
+        // Función para verificar si existen claves almacenadas y validar el dispositivo
+        async function checkStoredKeys() {
+            const storedPrivateKey = localStorage.getItem("frequentDevicePrivateKey");
+            const storedPublicKey = localStorage.getItem("frequentDevicePublicKey");
+
+            if (storedPrivateKey && storedPublicKey) {
+                // Si existen ambas claves, validar el dispositivo
+                addToLog("Se encontraron claves almacenadas. Validando dispositivo...");
+
+                // Validar que el dispositivo está correctamente enrollado
+                const isValid = await validateEnrolledDevice();
+
+                if (isValid) {
+                    // Si el dispositivo es válido, habilitar el botón de autenticación
+                    authBtn.disabled = false;
+                    addToLog("Dispositivo validado correctamente. Puede autenticarse.");
+                } else {
+                    // Si el dispositivo no es válido, deshabilitar el botón de autenticación
+                    authBtn.disabled = true;
+                    addToLog("El dispositivo no pudo ser validado. Por favor, registre el dispositivo nuevamente.", 'error');
+                }
+            } else if (storedPrivateKey) {
+                // Si solo existe la clave privada
+                addToLog("Se encontró una clave privada almacenada, pero falta la clave pública.");
+                // Intentar validar de todas formas
+                const isValid = await validateEnrolledDevice();
+                authBtn.disabled = !isValid;
+            } else if (storedPublicKey) {
+                // Si solo existe la clave pública
+                addToLog("Se encontró una clave pública almacenada, pero falta la clave privada.");
+                authBtn.disabled = true;
+            } else {
+                // No hay claves almacenadas
+                addToLog("No se encontraron claves almacenadas. Por favor, registre su dispositivo.");
+                authBtn.disabled = true;
+            }
+        }
+
+        // Generar Device ID
+        generateDeviceIdBtn.addEventListener('click', async () => {
+            try {
+                addToLog("Generando Device ID...");
+
+                // Usar el generador de DeviceID
+                deviceId = await generateDeviceId();
+
+                deviceIdElement.textContent = deviceId;
+                deviceIdElement.title = deviceId;
+
+                addToLog(`Device ID generado: ${deviceId}`);
+
+                // Colocar el DeviceID en los campos de entrada
+                usernameInput.value = deviceId;
+                authDeviceIdInput.value = deviceId;
+
+                // Habilitar botón de enroll
+                enrollBtn.disabled = false;
+
+                // Verificar si ya existen claves almacenadas
+                await checkStoredKeys();
+            } catch (error) {
+                addToLog(`Error al generar Device ID: ${error.message}`, 'error');
+            }
+        });
+
+        // Función para generar par de claves
+        async function generateKeyPair() {
+            try {
+                addToLog("Generando par de claves...");
+
+                // Generar par de claves RSA-PSS para firma/verificación
+                const keyPair = await window.crypto.subtle.generateKey(
+                    {
+                        name: "RSASSA-PKCS1-v1_5",
+                        modulusLength: 2048,
+                        publicExponent: new Uint8Array([0x01, 0x00, 0x01]),
+                        hash: "SHA-256",
+                    },
+                    true,
+                    ["sign", "verify"]
+                );
+
+                // Exportar claves
+                publicKey = await window.crypto.subtle.exportKey("jwk", keyPair.publicKey);
+                privateKey = await window.crypto.subtle.exportKey("jwk", keyPair.privateKey);
+
+                addToLog("Par de claves generado con éxito");
+                return true;
+            } catch (error) {
+                addToLog(`Error al generar claves: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        // Función para almacenar clave privada de forma segura
+        async function storePrivateKey() {
+            try {
+                // Encriptar la clave privada usando el deviceId como contraseña
+                addToLog(`Cifrando clave privada con DeviceID: ${deviceId.substring(0, 10)}...`);
+                const encryptedPrivateKey = await encryptPrivateKey(privateKey, deviceId);
+
+                // Almacenar la clave privada encriptada en localStorage para persistencia
+                localStorage.setItem("frequentDevicePrivateKey", JSON.stringify(encryptedPrivateKey));
+                addToLog("Clave privada encriptada y almacenada de forma segura");
+                return true;
+            } catch (error) {
+                addToLog(`Error al almacenar clave: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        // Función para encriptar la clave privada usando el deviceId como contraseña
+        async function encryptPrivateKey(privateKey, password) {
+            try {
+                // Convertir el password (deviceId) a una clave de encriptación
+                const encoder = new TextEncoder();
+                const passwordData = encoder.encode(password);
+                const passwordHash = await window.crypto.subtle.digest('SHA-256', passwordData);
+
+                // Importar la clave para usar en encriptación AES-GCM
+                const encryptionKey = await window.crypto.subtle.importKey(
+                    'raw',
+                    passwordHash,
+                    { name: 'AES-GCM' },
+                    false,
+                    ['encrypt']
+                );
+
+                // Generar un vector de inicialización (IV) aleatorio
+                const iv = window.crypto.getRandomValues(new Uint8Array(12));
+
+                // Encriptar la clave privada
+                const privateKeyStr = JSON.stringify(privateKey);
+                const privateKeyData = encoder.encode(privateKeyStr);
+                const encryptedData = await window.crypto.subtle.encrypt(
+                    {
+                        name: 'AES-GCM',
+                        iv: iv
+                    },
+                    encryptionKey,
+                    privateKeyData
+                );
+
+                // Convertir a formato que se pueda almacenar
+                return {
+                    iv: Array.from(iv),
+                    encryptedData: Array.from(new Uint8Array(encryptedData))
+                };
+            } catch (error) {
+                console.error('Error al encriptar la clave privada:', error);
+                throw error;
+            }
+        }
+
+        // Función para recuperar clave privada
+        async function retrievePrivateKey(customPassword = null) {
+            try {
+                const storedEncryptedKey = localStorage.getItem("frequentDevicePrivateKey");
+                if (!storedEncryptedKey) {
+                    addToLog("No se encontró clave privada para este dispositivo", 'error');
+                    return null;
+                }
+                // Usar la contraseña personalizada si se proporciona, de lo contrario usar deviceId
+                const password = customPassword || deviceId;
+                const passwordSource = customPassword ? "personalizada" : "DeviceID";
+                addToLog(`Intentando descifrar la clave privada con clave ${passwordSource}: ${password.substring(0, 10)}...`);
+
+
+                // Desencriptar la clave privada usando la contraseña proporcionada
+                const encryptedKey = JSON.parse(storedEncryptedKey);
+                privateKey = await decryptPrivateKey(encryptedKey, password);
+
+                // Intentar importar la clave para firma (RSASSA-PKCS1-v1_5)
+                let importedKey;
+                try {
+                    importedKey = await window.crypto.subtle.importKey(
+                        "jwk",
+                        privateKey,
+                        {
+                            name: "RSASSA-PKCS1-v1_5",
+                            hash: "SHA-256",
+                        },
+                        true,
+                        ["sign"]
+                    );
+                    addToLog("Clave importada para firma digital");
+                } catch (importError) {
+                    // Si falla, intentar importar para descifrado (RSA-OAEP)
+                    try {
+                        addToLog("La clave no es compatible con firma digital, intentando con descifrado...");
+                        importedKey = await window.crypto.subtle.importKey(
+                            "jwk",
+                            privateKey,
+                            {
+                                name: "RSA-OAEP",
+                                hash: "SHA-256",
+                            },
+                            true,
+                            ["decrypt"]
+                        );
+                        addToLog("Clave importada para descifrado. Esta clave fue generada con una versión anterior.");
+                    } catch (secondImportError) {
+                        throw new Error("No se pudo importar la clave: " + secondImportError.message);
+                    }
+                }
+
+                addToLog("Clave privada recuperada y desencriptada con éxito");
+                return importedKey;
+            } catch (error) {
+                addToLog(`Error al recuperar clave: ${error.message}`, 'error');
+                return null;
+            }
+        }
+
+        // Función para validar si el dispositivo está enrollado correctamente
+        async function validateEnrolledDevice(customPassword = null) {
+            try {
+                addToLog("Validando dispositivo enrollado...");
+
+                // Usar la contraseña personalizada si se proporciona, de lo contrario usar deviceId
+                const password = customPassword || deviceId;
+                const passwordSource = customPassword ? "personalizada" : "DeviceID";
+                addToLog(`Validando con clave ${passwordSource}: ${password.substring(0, 10)}...`);
+
+                // 1. Verificar si existe una clave privada almacenada
+                const storedEncryptedKey = localStorage.getItem("frequentDevicePrivateKey");
+                if (!storedEncryptedKey) {
+                    addToLog("Dispositivo no enrollado: No se encontró clave privada", 'error');
+                    return false;
+                }
+
+                // 2. Verificar si tenemos un DeviceID válido
+                if (!deviceId) {
+                    addToLog("Dispositivo no enrollado: No hay DeviceID disponible", 'error');
+                    return false;
+                }
+
+                // 3. Intentar descifrar la clave privada con la contraseña proporcionada
+                try {
+                    const encryptedKey = JSON.parse(storedEncryptedKey);
+                    const decryptedPrivateKey = await decryptPrivateKey(encryptedKey, password);
+
+                    // Si llegamos aquí, la desencriptación fue exitosa
+                    addToLog("Dispositivo validado correctamente", 'success');
+                    return true;
+                } catch (error) {
+                    const errorMsg = customPassword
+                        ? `Error al validar dispositivo: No se pudo descifrar la clave privada con la clave proporcionada`
+                        : `Error al validar dispositivo: No se pudo descifrar la clave privada con el DeviceID actual`;
+                    addToLog(errorMsg, 'error');
+                    return false;
+                }
+            } catch (error) {
+                addToLog(`Error en la validación del dispositivo: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        // Función para desencriptar la clave privada usando el deviceId como contraseña
+        async function decryptPrivateKey(encryptedKey, password) {
+            try {
+                // Convertir el password (deviceId) a una clave de desencriptación
+                const encoder = new TextEncoder();
+                const passwordData = encoder.encode(password);
+                const passwordHash = await window.crypto.subtle.digest('SHA-256', passwordData);
+
+                // Importar la clave para usar en desencriptación AES-GCM
+                const decryptionKey = await window.crypto.subtle.importKey(
+                    'raw',
+                    passwordHash,
+                    { name: 'AES-GCM' },
+                    false,
+                    ['decrypt']
+                );
+
+                // Reconstruir el IV y los datos encriptados
+                const iv = new Uint8Array(encryptedKey.iv);
+                const encryptedData = new Uint8Array(encryptedKey.encryptedData);
+
+                // Desencriptar la clave privada
+                const decryptedData = await window.crypto.subtle.decrypt(
+                    {
+                        name: 'AES-GCM',
+                        iv: iv
+                    },
+                    decryptionKey,
+                    encryptedData
+                );
+
+                // Convertir de vuelta a objeto
+                const decoder = new TextDecoder();
+                const decryptedStr = decoder.decode(decryptedData);
+                return JSON.parse(decryptedStr);
+            } catch (error) {
+                console.error('Error al desencriptar la clave privada:', error);
+                throw error;
+            }
+        }
+
+        // Registrar dispositivo (Enroll)
+        enrollBtn.addEventListener('click', async () => {
+            // Usar el valor del campo como DeviceId
+            const inputDeviceId = usernameInput.value.trim();
+            if (!inputDeviceId) {
+                addToLog("Por favor ingresa un ID de dispositivo", 'error');
+                return;
+            }
+
+            // Actualizar el deviceId con el valor del campo
+            deviceId = inputDeviceId;
+            deviceIdElement.textContent = deviceId;
+            deviceIdElement.title = deviceId;
+            addToLog(`Registrando dispositivo con Device ID: ${deviceId.substring(0, 10)}...`);
+
+            enrollBtn.disabled = true;
+            enrollBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Procesando...';
+
+            // 1. Generar par de claves
+            const keysGenerated = await generateKeyPair();
+            if (!keysGenerated) {
+                enrollBtn.disabled = false;
+                enrollBtn.innerHTML = '<i class="fas fa-save mr-2"></i> Registrar Dispositivo';
+                return;
+            }
+
+            // 2. Almacenar clave privada
+            const keyStored = await storePrivateKey();
+            if (!keyStored) {
+                enrollBtn.disabled = false;
+                enrollBtn.innerHTML = '<i class="fas fa-save mr-2"></i> Registrar Dispositivo';
+                return;
+            }
+
+            // 3. Para la demo, guardar la clave pública en localStorage
+            try {
+                // Guardar la clave pública en localStorage
+                localStorage.setItem("frequentDevicePublicKey", JSON.stringify(publicKey));
+                addToLog("Clave pública almacenada en localStorage para la demo");
+
+                // Simular envío al servidor (en un caso real sería una llamada API)
+                setTimeout(() => {
+                    // Simular respuesta del servidor
+                    addToLog(`Dispositivo registrado para el usuario: ${deviceId}`);
+                    addToLog(`Clave pública guardada: ${publicKey.n.substring(0, 20)}...`);
+
+                    enrolled = true;
+                    enrollBtn.classList.remove('bg-purple-600', 'hover:bg-purple-700');
+                    enrollBtn.classList.add('bg-gray-400', 'hover:bg-gray-500');
+                    enrollBtn.innerHTML = '<i class="fas fa-check mr-2"></i> Registrado';
+
+                    // Habilitar botón de autenticación
+                    authBtn.disabled = false;
+                }, 1000);
+            } catch (error) {
+                addToLog(`Error al guardar clave pública: ${error.message}`, 'error');
+                enrollBtn.disabled = false;
+                enrollBtn.innerHTML = '<i class="fas fa-save mr-2"></i> Registrar Dispositivo';
+            }
+        });
+
+        // Validar dispositivo enrollado
+        validateBtn.addEventListener('click', async () => {
+            validateBtn.disabled = true;
+            validateBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Validando...';
+
+            try {
+                // Obtener la clave de descifrado del campo de autenticación
+                const validationKey = authDeviceIdInput.value.trim();
+                if (!validationKey) {
+                    addToLog("Por favor ingresa una clave de descifrado para validar", 'error');
+                    validateBtn.disabled = false;
+                    validateBtn.innerHTML = '<i class="fas fa-check-circle mr-2"></i> Validar';
+                    return;
+                }
+
+                // Llamar a la función de validación con la clave proporcionada
+                const isValid = await validateEnrolledDevice(validationKey);
+
+                if (isValid) {
+                    // Si el dispositivo es válido, mostrar mensaje de éxito
+                    validateBtn.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+                    validateBtn.classList.add('bg-green-500', 'hover:bg-green-600');
+                    validateBtn.innerHTML = '<i class="fas fa-check-circle mr-2"></i> Dispositivo Válido';
+
+                    // Habilitar el botón de autenticación
+                    authBtn.disabled = false;
+
+                    // Restaurar el estilo original después de 2 segundos
+                    setTimeout(() => {
+                        validateBtn.classList.remove('bg-green-500', 'hover:bg-green-600');
+                        validateBtn.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                        validateBtn.innerHTML = '<i class="fas fa-check-circle mr-2"></i> Validar';
+                        validateBtn.disabled = false;
+                    }, 2000);
+                } else {
+                    // Si el dispositivo no es válido, mostrar mensaje de error
+                    validateBtn.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+                    validateBtn.classList.add('bg-red-500', 'hover:bg-red-600');
+                    validateBtn.innerHTML = '<i class="fas fa-times-circle mr-2"></i> Dispositivo No Válido';
+
+                    // Deshabilitar el botón de autenticación
+                    authBtn.disabled = true;
+
+                    // Restaurar el estilo original después de 2 segundos
+                    setTimeout(() => {
+                        validateBtn.classList.remove('bg-red-500', 'hover:bg-red-600');
+                        validateBtn.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                        validateBtn.innerHTML = '<i class="fas fa-check-circle mr-2"></i> Validar';
+                        validateBtn.disabled = false;
+                    }, 2000);
+                }
+            } catch (error) {
+                // En caso de error, mostrar mensaje
+                addToLog(`Error durante la validación: ${error.message}`, 'error');
+                validateBtn.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+                validateBtn.classList.add('bg-red-500', 'hover:bg-red-600');
+                validateBtn.innerHTML = '<i class="fas fa-times-circle mr-2"></i> Error';
+
+                // Restaurar el estilo original después de 2 segundos
+                setTimeout(() => {
+                    validateBtn.classList.remove('bg-red-500', 'hover:bg-red-600');
+                    validateBtn.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                    validateBtn.innerHTML = '<i class="fas fa-check-circle mr-2"></i> Validar';
+                    validateBtn.disabled = false;
+                }, 2000);
+            }
+        });
+
+        // Autenticar dispositivo
+        authBtn.addEventListener('click', async () => {
+            authBtn.disabled = true;
+            authBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Autenticando...';
+
+            // Obtener la clave de descifrado del campo de autenticación
+            const decryptionKey = authDeviceIdInput.value.trim();
+            if (!decryptionKey) {
+                addToLog("Por favor ingresa una clave de descifrado", 'error');
+                authBtn.disabled = false;
+                authBtn.innerHTML = '<i class="fas fa-fingerprint mr-2"></i> Autenticar';
+                return;
+            }
+
+            // 1. Recuperar clave privada usando la clave de descifrado
+            addToLog(`Autenticando con clave de descifrado: ${decryptionKey.substring(0, 10)}...`);
+            const privateKey = await retrievePrivateKey(decryptionKey);
+            if (!privateKey) {
+                authBtn.disabled = false;
+                authBtn.innerHTML = '<i class="fas fa-fingerprint mr-2"></i> Autenticar';
+                return;
+            }
+
+            // 2. Simular desafío del servidor (en un caso real sería una llamada API)
+            addToLog("Solicitando desafío al servidor...");
+
+            setTimeout(async () => {
+                // Simular que el servidor envía un desafío en texto plano
+                const challengeText = `Desafío-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+                addToLog(`Desafío recibido en texto plano: "${challengeText}"`);
+
+                // Recuperar la clave pública almacenada
+                try {
+                    // Obtener la clave pública de localStorage
+                    const storedPublicKey = localStorage.getItem("frequentDevicePublicKey");
+                    if (!storedPublicKey) {
+                        addToLog("No se encontró clave pública para este dispositivo", 'error');
+                        authBtn.disabled = false;
+                        authBtn.innerHTML = '<i class="fas fa-fingerprint mr-2"></i> Autenticar';
+                        return;
+                    }
+
+                    // Parsear la clave pública
+                    publicKey = JSON.parse(storedPublicKey);
+                    addToLog("Clave pública recuperada con éxito");
+
+                    // Convertir texto a ArrayBuffer para firmar
+                    const encoder = new TextEncoder();
+                    const challengeData = encoder.encode(challengeText);
+
+                    // Determinar el tipo de clave y realizar la operación correspondiente
+                    let signature;
+                    let isSigningKey = true;
+
+                    try {
+                        // Intentar firmar el desafío con la clave privada
+                        addToLog("Intentando firmar el desafío con la clave privada...");
+                        signature = await window.crypto.subtle.sign(
+                            {
+                                name: "RSASSA-PKCS1-v1_5"
+                            },
+                            privateKey,
+                            challengeData
+                        );
+                        addToLog("Desafío firmado correctamente");
+                    } catch (signError) {
+                        // Si falla la firma, es posible que sea una clave de descifrado (RSA-OAEP)
+                        isSigningKey = false;
+                        addToLog("La clave no es compatible con firma. Esta clave fue generada con una versión anterior.");
+                        addToLog("Usando método alternativo de autenticación (cifrado/descifrado)...");
+
+                        // Importar la clave pública para cifrado
+                        const encryptionPublicKey = await window.crypto.subtle.importKey(
+                            "jwk",
+                            publicKey,
+                            {
+                                name: "RSA-OAEP",
+                                hash: "SHA-256",
+                            },
+                            true,
+                            ["encrypt"]
+                        );
+
+                        // Cifrar el desafío con la clave pública
+                        const encryptedChallenge = await window.crypto.subtle.encrypt(
+                            { name: "RSA-OAEP" },
+                            encryptionPublicKey,
+                            challengeData
+                        );
+
+                        // Descifrar el desafío con la clave privada
+                        const decryptedChallenge = await window.crypto.subtle.decrypt(
+                            { name: "RSA-OAEP" },
+                            privateKey,
+                            encryptedChallenge
+                        );
+
+                        // Convertir ArrayBuffer a texto
+                        const decryptedText = new TextDecoder().decode(decryptedChallenge);
+
+                        // Verificar que coincide con el original
+                        if (decryptedText === challengeText) {
+                            addToLog("Desafío descifrado correctamente. Autenticación exitosa!", 'success');
+
+                            // Simular respuesta del servidor
+                            setTimeout(() => {
+                                // Cambiar temporalmente el estilo del botón para indicar éxito
+                                authBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+                                authBtn.classList.add('bg-green-400', 'hover:bg-green-500');
+                                authBtn.innerHTML = '<i class="fas fa-check-circle mr-2"></i> Autenticado';
+
+                                // Restaurar el estilo original después de 2 segundos
+                                setTimeout(() => {
+                                    authBtn.classList.remove('bg-green-400', 'hover:bg-green-500');
+                                    authBtn.classList.add('bg-green-600', 'hover:bg-green-700');
+                                    authBtn.innerHTML = '<i class="fas fa-fingerprint mr-2"></i> Autenticar';
+                                }, 2000);
+
+                                // Mostrar mensaje de éxito
+                                const successDiv = document.createElement('div');
+                                successDiv.className = 'mt-4 p-3 bg-green-100 border border-green-400 text-green-700 rounded';
+                                successDiv.innerHTML = '<i class="fas fa-check-circle mr-2"></i> Dispositivo autenticado correctamente';
+                                statusLog.appendChild(successDiv);
+                                statusLog.scrollTop = statusLog.scrollHeight;
+
+                                // Mantener el botón de autenticación habilitado
+                                authBtn.disabled = false;
+                                authBtn.innerHTML = '<i class="fas fa-fingerprint mr-2"></i> Autenticar';
+                            }, 500);
+                            return;
+                        } else {
+                            addToLog("Error: El desafío descifrado no coincide", 'error');
+                            authBtn.disabled = false;
+                            authBtn.innerHTML = '<i class="fas fa-fingerprint mr-2"></i> Autenticar';
+                            return;
+                        }
+                    }
+
+                    // 3. Simular verificación de firma en el servidor
+                    addToLog("Enviando firma al servidor para verificación...");
+
+                    // Importar la clave pública para verificación
+                    const importedPublicKey = await window.crypto.subtle.importKey(
+                        "jwk",
+                        publicKey,
+                        {
+                            name: "RSASSA-PKCS1-v1_5",
+                            hash: "SHA-256",
+                        },
+                        true,
+                        ["verify"]
+                    );
+
+                    // Verificar la firma con la clave pública
+                    const isValid = await window.crypto.subtle.verify(
+                        {
+                            name: "RSASSA-PKCS1-v1_5"
+                        },
+                        importedPublicKey,
+                        signature,
+                        encoder.encode(challengeText)
+                    );
+
+                    // 4. Verificar el resultado de la verificación
+                    if (isValid) {
+                        addToLog("Firma verificada correctamente. Autenticación exitosa!", 'success');
+
+                        // Simular respuesta del servidor
+                        setTimeout(() => {
+                            // Cambiar temporalmente el estilo del botón para indicar éxito
+                            authBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+                            authBtn.classList.add('bg-green-400', 'hover:bg-green-500');
+                            authBtn.innerHTML = '<i class="fas fa-check-circle mr-2"></i> Autenticado';
+
+                            // Restaurar el estilo original después de 2 segundos
+                            setTimeout(() => {
+                                authBtn.classList.remove('bg-green-400', 'hover:bg-green-500');
+                                authBtn.classList.add('bg-green-600', 'hover:bg-green-700');
+                                authBtn.innerHTML = '<i class="fas fa-fingerprint mr-2"></i> Autenticar';
+                            }, 2000);
+
+                            // Mostrar mensaje de éxito
+                            const successDiv = document.createElement('div');
+                            successDiv.className = 'mt-4 p-3 bg-green-100 border border-green-400 text-green-700 rounded';
+                            successDiv.innerHTML = '<i class="fas fa-check-circle mr-2"></i> Dispositivo autenticado correctamente';
+                            statusLog.appendChild(successDiv);
+                            statusLog.scrollTop = statusLog.scrollHeight;
+
+                            // Mantener el botón de autenticación habilitado
+                            authBtn.disabled = false;
+                            authBtn.innerHTML = '<i class="fas fa-fingerprint mr-2"></i> Autenticar';
+                        }, 500);
+                    } else {
+                        addToLog("Error: La firma no pudo ser verificada", 'error');
+                        authBtn.disabled = false;
+                        authBtn.innerHTML = '<i class="fas fa-fingerprint mr-2"></i> Autenticar';
+                    }
+                } catch (error) {
+                    addToLog(`Error en el proceso de autenticación: ${error.message}`, 'error');
+                    authBtn.disabled = false;
+                    authBtn.innerHTML = '<i class="fas fa-fingerprint mr-2"></i> Autenticar';
+                }
+            }, 1000);
+        });
+
+        // Función para agregar mensajes al log con autoscroll y límite de mensajes
+        function addToLog(message, type = 'info') {
+            console.log(message);
+
+            const now = new Date();
+            const timeString = now.toLocaleTimeString();
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `text-sm mb-1 ${type === 'error' ? 'text-red-600' : type === 'success' ? 'text-green-600' : 'text-gray-600'}`;
+            messageDiv.innerHTML = `<span class="text-gray-500">[${timeString}]</span> ${message}`;
+
+            // Limpiar el mensaje inicial si existe
+            if (statusLog.firstChild && statusLog.firstChild.classList && statusLog.firstChild.classList.contains('italic')) {
+                statusLog.removeChild(statusLog.firstChild);
+            }
+
+            // Limitar el número de mensajes (mantener los últimos 100)
+            const maxMessages = 100;
+            while (statusLog.children.length >= maxMessages) {
+                statusLog.removeChild(statusLog.firstChild);
+            }
+
+            // Añadir el nuevo mensaje
+            statusLog.appendChild(messageDiv);
+
+            // Asegurar que el scroll está al final
+            setTimeout(() => {
+                statusLog.scrollTop = statusLog.scrollHeight;
+            }, 0);
+        }
+    </script>
+</body>
+
+</html>

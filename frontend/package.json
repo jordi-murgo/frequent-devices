@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@trustdevicejs/trustdevice-js": "^1.0.6"
+  }
+}

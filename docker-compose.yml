@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fido2-backend
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+    restart: unless-stopped
+    networks:
+      - fido2-network
+
+  web-server:
+    build:
+      context: ./web-server
+      dockerfile: Dockerfile
+    container_name: fido2-web-server
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - API_URL=http://backend:3000
+    depends_on:
+      - backend
+    restart: unless-stopped
+    volumes:
+      - ./frontend:/usr/src/frontend:ro  # Mount frontend as read-only volume
+    networks:
+      - fido2-network
+
+networks:
+  fido2-network:
+    driver: bridge
