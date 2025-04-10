@@ -142,7 +142,7 @@
 
     <script type="module">
         // Importar la clase cliente
-        import { FrequentDeviceClient } from './client.js';
+        import { FrequentDeviceWebCryptoClient } from './client-webcrypto.js';
 
         // Elementos del DOM
         const generateDeviceIdBtn = document.getElementById('generateDeviceId');
@@ -156,7 +156,7 @@
         const statusLog = document.getElementById('statusLog');
 
         // Crear instancia del cliente
-        const client = new FrequentDeviceClient('/api');
+        const client = new FrequentDeviceWebCryptoClient('/api');
 
         // Funcionalidad para mostrar/ocultar contraseña
         togglePasswordBtn.addEventListener('click', () => {

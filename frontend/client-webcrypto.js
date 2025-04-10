@@ -9,7 +9,7 @@ import { generateDeviceId } from './TrustDeviceGenerator.js';
 /**
  * Clase para manejar la autenticación de dispositivos frecuentes
  */
-export class FrequentDeviceClient {
+export class FrequentDeviceWebCryptoClient {
     constructor(serverUrl = '/api') {
         this.serverUrl = serverUrl;
         this.deviceId = null;
