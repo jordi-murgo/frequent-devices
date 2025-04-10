@@ -24,7 +24,7 @@ export class FrequentDeviceWebCryptoClient {
     async generateDeviceId() {
         try {
             this.deviceId = await generateDeviceId();
-            return this.deviceId;
+            return this.deviceId + '-wc';
         } catch (error) {
             console.error('Error al generar Device ID:', error);
             throw error;
@@ -377,6 +377,29 @@ export class FrequentDeviceWebCryptoClient {
             return verificationResult;
         } catch (error) {
             console.error('Error en el proceso de autenticación:', error);
+            throw error;
+        }
+    }
+    
+    /**
+     * Valida si el dispositivo está registrado en el servidor
+     * Realiza una verificación simple solicitando un challenge
+     * @returns {Promise<boolean>} True si el dispositivo es válido
+     */
+    async validateDevice() {
+        try {
+            if (!this.deviceId) {
+                throw new Error('Se requiere deviceId para validar el dispositivo');
+            }
+            
+            // Intentar solicitar un challenge al servidor
+            // Si el dispositivo no está registrado, esto fallará
+            await this.requestChallenge();
+            
+            // Si llegamos aquí, el dispositivo es válido
+            return true;
+        } catch (error) {
+            console.error('Error al validar dispositivo:', error);
             throw error;
         }
     }

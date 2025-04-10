@@ -36,6 +36,26 @@
                 box-shadow: 0 0 0 0 rgba(167, 119, 227, 0);
             }
         }
+        
+        /* Estilos para los botones del selector */
+        .selector-btn {
+            transition: all 0.3s ease;
+        }
+        
+        .selector-btn.active {
+            background-color: #8b5cf6 !important; /* purple-600 */
+            color: white !important;
+        }
+        
+        .selector-btn.inactive {
+            background-color: white !important;
+            color: #111827 !important; /* gray-900 */
+        }
+        
+        .selector-btn:focus {
+            outline: none;
+            z-index: 10;
+        }
     </style>
 </head>
 
@@ -56,6 +76,18 @@
                         Frecuentes
                     </h1>
                     <p class="text-gray-600 text-center mb-6">Registra y autentica tu dispositivo de forma segura</p>
+                    
+                    <!-- Selector de implementación -->
+                    <div class="flex justify-center mb-6">
+                        <div class="inline-flex rounded-md shadow-sm" role="group">
+                            <button id="webCryptoBtn" type="button" class="selector-btn active px-4 py-2 text-sm font-medium border border-purple-600 rounded-l-lg hover:bg-purple-700 focus:z-10 focus:ring-2 focus:ring-purple-500">
+                                <i class="fas fa-key mr-2"></i>WebCrypto
+                            </button>
+                            <button id="webAuthnBtn" type="button" class="selector-btn inactive px-4 py-2 text-sm font-medium border border-purple-600 rounded-r-lg hover:bg-gray-100 focus:z-10 focus:ring-2 focus:ring-purple-500">
+                                <i class="fas fa-fingerprint mr-2"></i>WebAuthn
+                            </button>
+                        </div>
+                    </div>
 
                     <div class="space-y-4">
                         <div class="bg-gray-50 p-4 rounded-lg">
@@ -143,6 +175,7 @@
     <script type="module">
         // Importar la clase cliente
         import { FrequentDeviceWebCryptoClient } from './client-webcrypto.js';
+        import { FrequentDeviceWebAuthnClient } from './client-webauthn.js';
 
         // Elementos del DOM
         const generateDeviceIdBtn = document.getElementById('generateDeviceId');
@@ -154,9 +187,94 @@
         const authDeviceIdInput = document.getElementById('authDeviceId');
         const togglePasswordBtn = document.getElementById('togglePassword');
         const statusLog = document.getElementById('statusLog');
+        const webCryptoBtn = document.getElementById('webCryptoBtn');
+        const webAuthnBtn = document.getElementById('webAuthnBtn');
 
         // Crear instancia del cliente
-        const client = new FrequentDeviceWebCryptoClient('/api');
+        const clientWebCrypto = new FrequentDeviceWebCryptoClient('/api');
+        const clientWebAuthn = new FrequentDeviceWebAuthnClient('/api');
+
+        var client = clientWebCrypto;
+        var currentImplementation = 'WebCrypto';
+
+        // Selector de implementación
+        webCryptoBtn.addEventListener('click', async () => {
+            if (currentImplementation !== 'WebCrypto') {
+                // Actualizar cliente
+                client = clientWebCrypto;
+                currentImplementation = 'WebCrypto';
+                
+                // Actualizar UI
+                webCryptoBtn.classList.remove('inactive');
+                webCryptoBtn.classList.add('active');
+                
+                webAuthnBtn.classList.remove('active');
+                webAuthnBtn.classList.add('inactive');
+                
+                addToLog(`Cambiado a implementación WebCrypto`);
+                
+                // Recalcular deviceId si ya existe uno
+                if (deviceIdElement.textContent && deviceIdElement.textContent !== 'No generado') {
+                    try {
+                        addToLog("Recalculando Device ID para WebCrypto...");
+                        const deviceId = await client.generateDeviceId();
+                        
+                        deviceIdElement.textContent = deviceId;
+                        deviceIdElement.title = deviceId;
+                        
+                        // Actualizar los campos de entrada
+                        usernameInput.value = deviceId;
+                        authDeviceIdInput.value = deviceId;
+                        
+                        addToLog(`Nuevo Device ID generado: ${deviceId}`);
+                        
+                        // Verificar si ya existen claves almacenadas
+                        await checkStoredKeys();
+                    } catch (error) {
+                        addToLog(`Error al recalcular Device ID: ${error.message}`, 'error');
+                    }
+                }
+            }
+        });
+        
+        webAuthnBtn.addEventListener('click', async () => {
+            if (currentImplementation !== 'WebAuthn') {
+                // Actualizar cliente
+                client = clientWebAuthn;
+                currentImplementation = 'WebAuthn';
+                
+                // Actualizar UI
+                webAuthnBtn.classList.remove('inactive');
+                webAuthnBtn.classList.add('active');
+                
+                webCryptoBtn.classList.remove('active');
+                webCryptoBtn.classList.add('inactive');
+                
+                addToLog(`Cambiado a implementación WebAuthn`);
+                
+                // Recalcular deviceId si ya existe uno
+                if (deviceIdElement.textContent && deviceIdElement.textContent !== 'No generado') {
+                    try {
+                        addToLog("Recalculando Device ID para WebAuthn...");
+                        const deviceId = await client.generateDeviceId();
+                        
+                        deviceIdElement.textContent = deviceId;
+                        deviceIdElement.title = deviceId;
+                        
+                        // Actualizar los campos de entrada
+                        usernameInput.value = deviceId;
+                        authDeviceIdInput.value = deviceId;
+                        
+                        addToLog(`Nuevo Device ID generado: ${deviceId}`);
+                        
+                        // Verificar si ya existen claves almacenadas
+                        await checkStoredKeys();
+                    } catch (error) {
+                        addToLog(`Error al recalcular Device ID: ${error.message}`, 'error');
+                    }
+                }
+            }
+        });
 
         // Funcionalidad para mostrar/ocultar contraseña
         togglePasswordBtn.addEventListener('click', () => {
@@ -202,18 +320,25 @@
         // Función para verificar si existen claves almacenadas
         async function checkStoredKeys() {
             const storedPrivateKey = localStorage.getItem("frequentDevicePrivateKey");
+            // Obtener el deviceId actual como texto
+            const currentDeviceId = deviceIdElement.textContent;
+            client.deviceId = currentDeviceId;
 
             if (storedPrivateKey) {
                 // Si existen ambas claves, validar el dispositivo
-                addToLog("Se encontraron claves almacenadas. Validando dispositivo...");
+                addToLog(`Se encontraron claves almacenadas. Validando dispositivo ${currentDeviceId}...`);
 
                 try {
                     // Intentar recuperar la clave privada
                     await client.retrievePrivateKey();
+                    
+                    // Validar el dispositivo
+                    await client.validateDevice();
+                    
                     addToLog("Dispositivo validado correctamente. Puede autenticarse.");
                     authBtn.disabled = false;
                 } catch (error) {
-                    addToLog("El dispositivo no pudo ser validado. Por favor, registre el dispositivo nuevamente.", 'error');
+                    addToLog(`El dispositivo ${currentDeviceId} no pudo ser validado. Por favor, registre el dispositivo nuevamente.`, 'error');
                     authBtn.disabled = true;
                 }
             } else {
@@ -272,15 +397,26 @@
                 // Registrar el dispositivo en el servidor
                 await client.registerDevice();
 
-                // Simular respuesta del servidor
+                // Respuesta del servidor
                 setTimeout(() => {
-                    // Simular respuesta del servidor
+                    // Mostrar información del registro
                     addToLog(`Dispositivo registrado para el usuario: ${inputDeviceId}`);
                     addToLog(`Clave pública guardada en el servidor`);
 
+                    // Cambiar temporalmente el estilo del botón para indicar éxito
                     enrollBtn.classList.remove('bg-purple-600', 'hover:bg-purple-700');
-                    enrollBtn.classList.add('bg-gray-400', 'hover:bg-gray-500');
-                    enrollBtn.innerHTML = '<i class="fas fa-check mr-2"></i> Registrado';
+                    enrollBtn.classList.add('bg-green-600', 'hover:bg-green-700');
+                    enrollBtn.innerHTML = '<i class="fas fa-check-circle mr-2"></i> Registrado';
+                    
+                    // Después de 1.5 segundos, restaurar el botón a su estado normal
+                    setTimeout(() => {
+                        enrollBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+                        enrollBtn.classList.add('bg-purple-600', 'hover:bg-purple-700');
+                        enrollBtn.innerHTML = '<i class="fas fa-save mr-2"></i> Registrar Dispositivo';
+                        
+                        // Habilitar el botón para permitir registros adicionales
+                        enrollBtn.disabled = false;
+                    }, 1500);
 
                     // Habilitar botón de autenticación
                     authBtn.disabled = false;
