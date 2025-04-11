@@ -1,38 +1,50 @@
 # FIDO2 Frequent Devices Authentication System
 
-A modern client-server application for FIDO2 device authentication, allowing users to register and authenticate trusted devices securely.
+A modern client-server application for FIDO2 device authentication, allowing users to register and authenticate trusted devices securely using two different authentication methods: WebCrypto and WebAuthn.
 
 ## Project Structure
 
-The project consists of three main components:
+The project consists of two main components:
 
 ### 1. Backend Server (`/backend`)
 
-A Node.js Express server that provides the FIDO2 authentication API:
-- Challenge generation
-- Device registration
-- Signature verification
+A Node.js Express server that provides dual authentication APIs:
+- Challenge generation for both WebCrypto and WebAuthn
+- Device registration with support for both authentication types
+- Signature verification with type-specific validation
+- Persistent storage of device credentials in JSON files
 
 ### 2. Frontend Client (`/frontend`)
 
-A browser-based client application that:
-- Generates device IDs
-- Creates and stores cryptographic keys
-- Signs challenges
-- Provides a user interface for the authentication flow
-
-### 3. Web Server (`/web-server`)
-
-A simple Express server that:
-- Serves the static frontend files
-- Proxies API requests to the backend server
+A modular browser-based client application that:
+- Implements a common interface for authentication clients
+- Provides two concrete implementations:
+  - **WebCrypto Client**: Uses the Web Cryptography API for key generation and challenge signing
+  - **WebAuthn Client**: Uses the WebAuthn standard for passwordless authentication with biometrics or security keys
+- Generates unique device IDs
+- Creates and securely stores cryptographic keys
+- Signs challenges with the appropriate method
+- Offers a user-friendly interface for the authentication flow
 
 ## Features
 
+### Core Features
+- **Dual Authentication Methods**: Choose between WebCrypto (software-based) or WebAuthn (hardware-backed)
 - **Device ID Generation**: Create unique identifiers for devices
 - **Key Pair Generation**: Generate cryptographic key pairs for secure authentication
 - **Challenge-Response Authentication**: Secure authentication using cryptographic signatures
-- **Secure Key Storage**: Encrypted storage of private keys in the browser
+- **Secure Key Storage**: Encrypted storage of private keys in the browser (WebCrypto) or secure element (WebAuthn)
+
+### Security Features
+- **Type-specific Authentication**: Server validates signatures based on the authentication type
+- **Persistent Credential Storage**: Server maintains a database of registered devices
+- **Counter Verification**: WebAuthn implementation supports signature counter verification (configurable)
+- **Encrypted Private Keys**: WebCrypto implementation encrypts private keys before storage
+
+### User Experience
+- **Modern UI**: Clean interface with real-time status updates
+- **Authentication Type Selection**: Easily switch between WebCrypto and WebAuthn
+- **Detailed Logging**: View the authentication process in real-time
 
 ## Getting Started
 
@@ -40,6 +52,7 @@ A simple Express server that:
 
 - Node.js (v14 or higher)
 - npm (v6 or higher)
+- Modern browser with WebCrypto and WebAuthn support
 
 ### Installation
 
