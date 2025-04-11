@@ -5,29 +5,97 @@
 
 // Importar el generador de DeviceID
 import { generateDeviceId } from './TrustDeviceGenerator.js';
+// Importar la clase base
+import { FrequentDeviceClient } from './frequent-device-client-interface.js';
 
 /**
  * Clase para manejar la autenticación de dispositivos frecuentes
  */
-export class FrequentDeviceWebAuthnClient {
+export class FrequentDeviceWebAuthnClient extends FrequentDeviceClient {
     constructor(serverUrl = '/api') {
-        this.serverUrl = serverUrl;
-        this.deviceId = null;
-        this.publicKey = null;
-        this.privateKey = null;
+        super(serverUrl); // Llama al constructor de la clase base
+        // Cargar valores específicos de WebAuthn desde localStorage
+        this.deviceId = localStorage.getItem("webAuthnDeviceId") || this.deviceId;
+        this.credentialId = localStorage.getItem("webAuthnCredentialId") || null;
+        // publicKey se maneja dinámicamente
     }
 
     /**
-     * Genera un ID de dispositivo único
-     * @returns {Promise<string>} El ID del dispositivo generado
+     * Ensures a Device ID exists, generating one if necessary.
+     * @returns {Promise<string>} The Device ID.
      */
-    async generateDeviceId() {
-        try {
-            this.deviceId = await generateDeviceId();
-            return this.deviceId + '-wa';
-        } catch (error) {
-            console.error('Error al generar Device ID:', error);
-            throw error;
+    async ensureDeviceId() {
+        if (!this.deviceId) {
+            console.log("Generando nuevo Device ID (WebAuthn)... ");
+            try {
+                // Generate a new Device ID using the imported function
+                this.deviceId = await generateDeviceId();
+                // Store it for persistence
+                localStorage.setItem("webAuthnDeviceId", this.deviceId);
+            } catch (error) {
+                console.error('Error al generar Device ID (WebAuthn):', error);
+                throw error;
+            }
+        }
+
+        // Attempt to load the existing public key if the deviceId was found
+        if (localStorage.getItem("webAuthnDeviceId") === this.deviceId) { // Check if we are using an existing ID
+            const storedPublicKey = localStorage.getItem("webAuthnPublicKey");
+            if (storedPublicKey) {
+                try {
+                    this.publicKey = JSON.parse(storedPublicKey);
+                    console.log("ensureDeviceId: Clave pública existente cargada en el cliente.");
+                } catch (e) {
+                    console.error("ensureDeviceId: Error al parsear la clave pública almacenada:", e);
+                    // Clear potentially corrupted keys if parsing fails
+                    localStorage.removeItem("webAuthnPublicKey");
+                    localStorage.removeItem("webAuthnCredentialId");
+                    this.publicKey = null; // Reset client state
+                    console.warn("ensureDeviceId: Claves almacenadas eliminadas debido a error de parsing.");
+                }
+            } else {
+                // Device ID exists, but public key doesn't. This indicates an incomplete registration.
+                console.log("ensureDeviceId: Device ID encontrado, pero no la clave pública. Se requiere registro.");
+                this.publicKey = null; // Ensure client state reflects missing key
+            }
+        }
+
+        return this.deviceId;
+    }
+
+    /**
+     * Verifica si ya existe una credencial WebAuthn (ID, clave pública, ID de credencial) en localStorage.
+     * También carga la clave pública si existe.
+     * @returns {Promise<boolean>} True si existe una credencial válida.
+     */
+    async checkForExistingCredential() {
+        await this.ensureDeviceId(); // Asegura que this.deviceId esté cargado
+        if (!this.deviceId) {
+            console.log("WebAuthnClient.checkForExistingCredential: No deviceId found.");
+            return false;
+        }
+
+        const storedCredentialId = localStorage.getItem("webAuthnCredentialId");
+        const storedPublicKey = localStorage.getItem("webAuthnPublicKey");
+
+        if (storedCredentialId && storedPublicKey) {
+            console.log("WebAuthnClient.checkForExistingCredential: Found stored credential ID and public key.");
+            try {
+                // Load the public key if it was stored (usually it might not be needed directly for WebAuthn get)
+                this.publicKey = JSON.parse(storedPublicKey); 
+                console.log("WebAuthnClient.checkForExistingCredential: Public key loaded into client instance.");
+                return true; // Indicate that essential credentials exist
+            } catch (e) {
+                console.error("WebAuthnClient.checkForExistingCredential: Error parsing stored public key:", e);
+                // Consider corrupted state, clear keys
+                this.clearLocalCredentials(); 
+                return false;
+            }
+        } else {
+            console.log("WebAuthnClient.checkForExistingCredential: Missing stored keys (CredentialID exists?", !!storedCredentialId, ", PublicKey exists?", !!storedPublicKey, ")");
+            // Ensure client state is clean if keys are missing
+            this.publicKey = null; 
+            return false;
         }
     }
 
@@ -417,6 +485,18 @@ export class FrequentDeviceWebAuthnClient {
             console.error('Error al validar dispositivo WebAuthn:', error);
             throw error;
         }
+    }
+
+    /**
+     * Elimina las credenciales WebAuthn almacenadas en localStorage
+     */
+    clearLocalCredentials() {
+        localStorage.removeItem("webAuthnDeviceId");
+        localStorage.removeItem("webAuthnPublicKey");
+        localStorage.removeItem("webAuthnCredentialId"); // Asegúrate de limpiar también el ID de credencial
+        this.deviceId = null;
+        this.publicKey = null;
+        console.log("Credenciales WebAuthn locales eliminadas.");
     }
 
     /**

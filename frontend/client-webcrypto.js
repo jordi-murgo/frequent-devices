@@ -5,14 +5,17 @@
 
 // Importar el generador de DeviceID (asumiendo que existe y funciona)
 import { generateDeviceId } from './TrustDeviceGenerator.js';
+// Importar la clase base
+import { FrequentDeviceClient } from './frequent-device-client-interface.js';
 
 /**
  * Clase para manejar la autenticación de dispositivos frecuentes usando WebCrypto
  */
-export class FrequentDeviceWebCryptoClient {
+export class FrequentDeviceWebCryptoClient extends FrequentDeviceClient {
     constructor(serverBaseUrl = '') { // Ajustar si la API está en /api o similar
-        this.serverBaseUrl = serverBaseUrl; // e.g., '/api'
-        this.deviceId = null;
+        super(serverBaseUrl); // Llama al constructor de la clase base
+        // Cargar valores específicos de WebCrypto desde localStorage
+        this.deviceId = localStorage.getItem("frequentDeviceDeviceId") || this.deviceId; // Prioriza el storage si existe
         this.publicKey = null; // Almacenado en formato JWK
         // La clave privada no se guarda directamente en la instancia, se recupera de localStorage
     }
@@ -90,6 +93,10 @@ export class FrequentDeviceWebCryptoClient {
         try {
             console.log("Cifrando y almacenando clave privada...");
             const encryptedPrivateKey = await this.encryptPrivateKey(privateKey, this.deviceId);
+
+            // DEBUG: Log the object before stringifying
+            console.log("DEBUG: Encrypted object before stringify:", encryptedPrivateKey);
+
             localStorage.setItem("frequentDevicePrivateKey_enc", JSON.stringify(encryptedPrivateKey));
             // Opcional: Almacenar la clave pública también para no tener que regenerarla
             localStorage.setItem("frequentDevicePublicKey", JSON.stringify(this.publicKey));
@@ -160,7 +167,14 @@ export class FrequentDeviceWebCryptoClient {
 
         try {
             console.log("Recuperando y descifrando clave privada...");
+            // DEBUG: Log raw string from localStorage
+            console.log("DEBUG: Raw string retrieved from localStorage:", storedEncryptedKey);
+
             const encryptedKey = JSON.parse(storedEncryptedKey);
+
+            // DEBUG: Log parsed object
+            console.log("DEBUG: Parsed object from localStorage:", encryptedKey);
+
             const decryptedPrivateKeyJWK = await this.decryptPrivateKey(encryptedKey, this.deviceId);
 
             // Importar la clave JWK descifrada para poder usarla en operaciones de firma
@@ -199,6 +213,9 @@ export class FrequentDeviceWebCryptoClient {
             const encryptedData = new Uint8Array(encryptedKey.encryptedData);
             const encoder = new TextEncoder();
 
+            // DEBUG: Log reconstructed array lengths
+            console.log(`DEBUG: Decrypting with Salt[${salt.length}], IV[${iv.length}], Data[${encryptedData.length}]`);
+
             // Derivar clave de descifrado desde el password (deviceId) usando PBKDF2 y el salt guardado
             const passwordKey = await window.crypto.subtle.importKey(
                 'raw', encoder.encode(password), { name: 'PBKDF2' }, false, ['deriveKey']
@@ -234,19 +251,33 @@ export class FrequentDeviceWebCryptoClient {
      * @returns {Promise<boolean>} True si existe una clave cifrada.
      */
     async checkForExistingCredential() {
-        await this.ensureDeviceId(); // Carga o genera deviceId
+        await this.ensureDeviceId(); // Asegura que this.deviceId esté cargado
+        if (!this.deviceId) {
+            console.log("checkForExistingCredential: No deviceId found.");
+            return false;
+        }
+
         const storedEncryptedKey = localStorage.getItem("frequentDevicePrivateKey_enc");
         const storedPublicKey = localStorage.getItem("frequentDevicePublicKey");
 
-        if (storedEncryptedKey && this.deviceId) {
-             console.log(`Clave cifrada encontrada para deviceId: ${this.deviceId}`);
-             if (storedPublicKey) {
-                 this.publicKey = JSON.parse(storedPublicKey);
-             }
-             return true;
+        if (storedEncryptedKey && storedPublicKey) {
+            console.log("checkForExistingCredential: Found stored encrypted private key and public key.");
+            try {
+                this.publicKey = JSON.parse(storedPublicKey);
+                console.log("checkForExistingCredential: Public key loaded into client instance.");
+                return true; // Indicate that essential credentials exist
+            } catch (e) {
+                console.error("checkForExistingCredential: Error parsing stored public key:", e);
+                // Consider corrupted state, clear keys
+                this.clearLocalCredentials(); 
+                return false;
+            }
+        } else {
+            console.log("checkForExistingCredential: Missing stored keys (EncryptedPrivateKey exists?", !!storedEncryptedKey, ", PublicKey exists?", !!storedPublicKey, ")");
+            // Ensure client state is clean if keys are missing
+            this.publicKey = null; 
+            return false;
         }
-        console.log("No se encontró credencial local existente.");
-        return false;
     }
 
     /**
@@ -254,7 +285,7 @@ export class FrequentDeviceWebCryptoClient {
      * Genera claves si no existen y envía la clave pública al servidor.
      * @returns {Promise<Object>} Respuesta del servidor
      */
-    async enrollDevice() {
+    async registerDevice() {
         try {
             await this.ensureDeviceId(); // Asegura tener deviceId
 
@@ -284,14 +315,15 @@ export class FrequentDeviceWebCryptoClient {
             console.log(`Iniciando enrollment para Device ID: ${this.deviceId}`);
             console.log("Enviando clave pública al servidor:", this.publicKey);
 
-            const response = await fetch(`${this.serverBaseUrl}/enroll-1-step`, {
+            const response = await fetch(`${this.serverUrl}/register`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
                     deviceId: this.deviceId,
-                    publicKey: this.publicKey // Enviar clave pública en formato JWK
+                    publicKey: this.publicKey, // Enviar clave pública en formato JWK
+                    authenticationType: 'webcrypto'
                 })
             });
 
@@ -321,7 +353,7 @@ export class FrequentDeviceWebCryptoClient {
         }
         try {
             console.log(`Solicitando challenge para Device ID: ${this.deviceId}`);
-            const response = await fetch(`${this.serverBaseUrl}/challenge?deviceId=${encodeURIComponent(this.deviceId)}`);
+            const response = await fetch(`${this.serverUrl}/challenge?deviceId=${encodeURIComponent(this.deviceId)}`);
             const data = await response.json();
 
             if (!response.ok || !data.success) {
@@ -377,14 +409,14 @@ export class FrequentDeviceWebCryptoClient {
      * @param {string} signature - La firma en formato base64.
      * @returns {Promise<Object>} Respuesta del servidor sobre la validación.
      */
-    async validateSignature(challenge, signature) {
+    async verifySignature(challenge, signature) {
          await this.ensureDeviceId(); // Asegura tener deviceId
          if (!this.deviceId) {
             throw new Error('Se requiere deviceId para validar la firma');
          }
         try {
             console.log(`Validando firma para Device ID: ${this.deviceId}`);
-            const response = await fetch(`${this.serverBaseUrl}/validate`, {
+            const response = await fetch(`${this.serverUrl}/verify`, { // Cambio a /verify
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -435,7 +467,7 @@ export class FrequentDeviceWebCryptoClient {
             const signature = await this.signChallenge(challenge);
 
             // 3. Enviar la firma al servidor para verificación
-            const validationResult = await this.validateSignature(challenge, signature);
+            const validationResult = await this.verifySignature(challenge, signature);
 
             if (validationResult.success) {
                 console.log("Autenticación completada con éxito.");
@@ -525,7 +557,7 @@ async function exampleUsage() {
                 // Quizás ofrecer registrar de nuevo
                 console.log("Ofreciendo registrar de nuevo...");
                 await client.clearLocalCredentials(); // Limpiar credenciales viejas/inválidas
-                const enrollResult = await client.enrollDevice();
+                const enrollResult = await client.registerDevice();
                  if (enrollResult.success) {
                     alert("Dispositivo registrado de nuevo con éxito.");
                  } else {
@@ -535,7 +567,7 @@ async function exampleUsage() {
         } else {
             // No hay credencial, registrar el dispositivo
             console.log("No hay credencial local, registrando dispositivo...");
-            const enrollResult = await client.enrollDevice();
+            const enrollResult = await client.registerDevice();
             if (enrollResult.success) {
                 alert("Dispositivo registrado con éxito!");
                 // Podrías intentar autenticar inmediatamente después si quieres
@@ -554,4 +586,4 @@ async function exampleUsage() {
 
 // Llamar a la función de ejemplo cuando sea apropiado (ej. al cargar la página o al hacer clic en un botón)
 // window.addEventListener('load', exampleUsage);
-*/
+*/ // <-- ADD CLOSING COMMENT MARKER
