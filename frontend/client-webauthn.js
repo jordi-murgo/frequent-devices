@@ -124,7 +124,7 @@ export class FrequentDeviceWebAuthnClient extends FrequentDeviceClient {
             const publicKeyCredentialCreationOptions = {
                 challenge: challengeArrayBuffer, // Usar el challenge del servidor
                 rp: {
-                    name: 'Santander Dispositivos Frecuentes',
+                    name: 'Santaclaus Dispositivos Frecuentes',
                     id: window.location.hostname // Usar el hostname actual como RP ID
                 },
                 user: {
