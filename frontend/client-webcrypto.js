@@ -424,7 +424,8 @@ export class FrequentDeviceWebCryptoClient extends FrequentDeviceClient {
                 body: JSON.stringify({
                     deviceId: this.deviceId,
                     challenge: challenge,
-                    signature: signature // Firma en base64
+                    signature: signature, // Firma en base64
+                    authenticationType: 'webcrypto' // Specify the authentication type
                 })
             });
 

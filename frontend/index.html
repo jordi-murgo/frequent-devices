@@ -228,38 +228,35 @@
             }
         });
 
+        // Inicializar con la implementación por defecto al cargar la página
+        initializeClient('WebCrypto'); // O 'WebAuthn' si prefieres ese como defecto
+
         // Verificar si ya existen claves almacenadas y generar DeviceID al cargar la página
-        window.addEventListener('DOMContentLoaded', async () => {
-            initializeClient('WebCrypto'); // Inicializar con WebCrypto por defecto
-            // Generar DeviceID automáticamente al iniciar
-            try {
-                addToLog("Generando Device ID automáticamente...");
+        document.addEventListener('DOMContentLoaded', async () => {
+            const deviceId = await client.ensureDeviceId(); // Ahora 'client' debería estar inicializado
 
-                // Usar el cliente para generar DeviceID
-                const deviceId = await client.ensureDeviceId();
+            deviceIdElement.textContent = deviceId;
+            deviceIdElement.title = deviceId;
 
-                deviceIdElement.textContent = deviceId;
-                deviceIdElement.title = deviceId;
+            addToLog(`Device ID generado: ${deviceId}`);
 
-                addToLog(`Device ID generado: ${deviceId}`);
+            // Colocar el DeviceID en los campos de entrada
+            usernameInput.value = deviceId;
+            authDeviceIdInput.value = deviceId;
 
-                // Colocar el DeviceID en los campos de entrada
-                usernameInput.value = deviceId;
-                authDeviceIdInput.value = deviceId;
+            // Habilitar el botón de registro ya que tenemos un Device ID válido
+            enrollBtn.disabled = false;
 
-                // Verificar si ya existen claves almacenadas usando el método del cliente
-                const hasCredential = await client.checkForExistingCredential();
-                if (hasCredential) {
-                    addToLog("Claves encontradas. Listo para autenticar.");
-                    enrollBtn.disabled = true; // Ya registrado
-                    authBtn.disabled = false; // Listo para autenticar
-                } else {
-                    addToLog("No se encontraron claves almacenadas. Por favor, registre su dispositivo.");
-                    enrollBtn.disabled = false; // Necesita registrarse
-                    authBtn.disabled = true; // No puede autenticar sin registrar
-                }
-            } catch (error) {
-                addToLog(`Error al inicializar: ${error.message}`, 'error');
+            // Verificar si ya existen claves almacenadas usando el método del cliente
+            const hasCredential = await client.checkForExistingCredential();
+            if (hasCredential) {
+                addToLog("Claves encontradas. Listo para autenticar.");
+                enrollBtn.disabled = true; // Ya registrado
+                authBtn.disabled = false; // Listo para autenticar
+            } else {
+                addToLog("No se encontraron claves almacenadas. Por favor, registre su dispositivo.");
+                enrollBtn.disabled = false; // Necesita registrarse
+                authBtn.disabled = true; // No puede autenticar sin registrar
             }
         });
 
@@ -382,42 +379,55 @@
                 // 1. Solicitar un challenge al servidor
                 addToLog("Solicitando challenge al servidor...");
                 const challenge = await client.requestChallenge();
-                addToLog(`Challenge recibido: ${challenge}`);
+                addToLog(`Challenge recibido (${currentImplementation}): ${challenge}`);
                 
                 // 2. Firmar el challenge con la clave privada
                 addToLog("Firmando challenge con la clave privada...");
-                const signature = await client.signChallenge(challenge); // No decryption key needed here for either client
-                addToLog(`Challenge firmado correctamente (${currentImplementation})`);
-                
-                // 3. Enviar la firma al servidor para verificación
-                addToLog("Enviando firma al servidor para verificación...");
-                const result = await client.verifySignature(challenge, signature); // Correct method name
+                let result; // Declare result variable outside the conditional
+                if (currentImplementation === 'WebAuthn') {
+                    const assertion = await client.signChallenge(challenge);
+                    addToLog(`Challenge firmado correctamente (${currentImplementation}). Assertion object obtained.`);
+                    
+                    // 3. Enviar la aserción al servidor para verificación
+                    addToLog("Enviando aserción al servidor para verificación...");
+                    result = await client.verifySignature(assertion); // Pass the full assertion object
+                } else {
+                    // WebCrypto flow (remains the same)
+                    const signature = await client.signChallenge(challenge); 
+                    addToLog(`Challenge firmado correctamente (${currentImplementation})`);
+                    
+                    // 3. Enviar la firma al servidor para verificación
+                    addToLog("Enviando firma al servidor para verificación...");
+                    result = await client.verifySignature(challenge, signature); // Pass challenge and signature string
+                }
                 
                 // 4. Procesar el resultado
-                addToLog("Firma verificada correctamente. Autenticación exitosa!", 'success');
-                
-                // Cambiar temporalmente el estilo del botón para indicar éxito
-                authBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
-                authBtn.classList.add('bg-green-400', 'hover:bg-green-500');
-                authBtn.innerHTML = '<i class="fas fa-check-circle mr-2"></i> Autenticado';
-                
-                // Restaurar el estilo original después de 2 segundos
-                setTimeout(() => {
-                    authBtn.classList.remove('bg-green-400', 'hover:bg-green-500');
-                    authBtn.classList.add('bg-green-600', 'hover:bg-green-700');
+                if (result && result.success) { // Check if result exists and has success property
+                    addToLog("Firma verificada correctamente. Autenticación exitosa!", 'success');
+                    
+                    // Cambiar temporalmente el estilo del botón para indicar éxito
+                    authBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+                    authBtn.classList.add('bg-green-400', 'hover:bg-green-500');
+                    authBtn.innerHTML = '<i class="fas fa-check-circle mr-2"></i> Autenticado';
+                    
+                    // Restaurar el estilo original después de 2 segundos
+                    setTimeout(() => {
+                        authBtn.classList.remove('bg-green-400', 'hover:bg-green-500');
+                        authBtn.classList.add('bg-green-600', 'hover:bg-green-700');
+                        authBtn.innerHTML = '<i class="fas fa-fingerprint mr-2"></i> Autenticar';
+                    }, 2000);
+                    
+                    // Mostrar mensaje de éxito
+                    const successDiv = document.createElement('div');
+                    successDiv.className = 'mt-4 p-3 bg-green-100 border border-green-400 text-green-700 rounded';
+                    successDiv.innerHTML = '<i class="fas fa-check-circle mr-2"></i> Dispositivo autenticado correctamente';
+                    statusLog.appendChild(successDiv);
+                    statusLog.scrollTop = statusLog.scrollHeight;
+                    
+                    // Mantener el botón de autenticación habilitado
+                    authBtn.disabled = false;
                     authBtn.innerHTML = '<i class="fas fa-fingerprint mr-2"></i> Autenticar';
-                }, 2000);
-                
-                // Mostrar mensaje de éxito
-                const successDiv = document.createElement('div');
-                successDiv.className = 'mt-4 p-3 bg-green-100 border border-green-400 text-green-700 rounded';
-                successDiv.innerHTML = '<i class="fas fa-check-circle mr-2"></i> Dispositivo autenticado correctamente';
-                statusLog.appendChild(successDiv);
-                statusLog.scrollTop = statusLog.scrollHeight;
-                
-                // Mantener el botón de autenticación habilitado
-                authBtn.disabled = false;
-                authBtn.innerHTML = '<i class="fas fa-fingerprint mr-2"></i> Autenticar';
+                }
             } catch (error) {
                 addToLog(`Error en el proceso de autenticación: ${error.message}`, 'error');
                 authBtn.disabled = false;

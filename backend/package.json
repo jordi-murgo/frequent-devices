@@ -8,6 +8,7 @@
     "dev": "nodemon server.js"
   },
   "dependencies": {
+    "@simplewebauthn/server": "^13.1.1",
     "base64url": "^3.0.1",
     "body-parser": "^1.20.2",
     "cbor": "^10.0.3",
